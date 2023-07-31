@@ -243,6 +243,8 @@ static const TestsuiteProposal TestsuiteProposals[] = {
     {"tail-call"sv, {Proposal::TailCall}},
     {"extended-const"sv, {Proposal::ExtendedConst}},
     {"threads"sv, {Proposal::Threads}},
+    {"function-references"sv,
+     {Proposal::FunctionReferences, Proposal::TailCall}},
 };
 
 } // namespace
@@ -310,12 +312,9 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
     if (ValStr == "null"sv) {
       return Got.first.get<RefVariant>().isNull();
     } else {
-      if (Got.first.get<RefVariant>().isNull()) {
-        return false;
-      }
-      return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
-                 WasmEdge::retrieveFuncRef(Got.first.get<RefVariant>()))) ==
-             static_cast<uint32_t>(std::stoul(ValStr));
+      // Due to the implementations of the embedders, the value of FuncRef is
+      // opaque. Therefore not to compare the value here.
+      return !Got.first.get<RefVariant>().isNull();
     }
   } else if (TypeStr == "externref"sv) {
     if (!Got.second.isExternRefType()) {
@@ -331,6 +330,17 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
                  &WasmEdge::retrieveExternRef<uint32_t>(
                      Got.first.get<RefVariant>()))) ==
              static_cast<uint32_t>(std::stoul(ValStr));
+    }
+  } else if (TypeStr == "ref"sv) {
+    if (!Got.second.isNullableRefType()) {
+      return false;
+    }
+    if (ValStr == "null"sv) {
+      return Got.first.get<RefVariant>().isNull();
+    } else {
+      // Due to the implementations of the embedders, the value of Ref is
+      // opaque. Therefore not to compare the value here.
+      return !Got.first.get<RefVariant>().isNull();
     }
   } else if (TypeStr == "i32"sv) {
     if (Got.second.getCode() != ValTypeCode::I32) {
