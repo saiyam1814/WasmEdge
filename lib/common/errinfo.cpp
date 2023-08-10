@@ -83,20 +83,20 @@ std::ostream &operator<<(std::ostream &OS, const struct InfoMismatch &Rhs) {
        << " , Got: " << (1UL << Rhs.GotAlignment);
     break;
   case MismatchCategory::ValueType:
-    OS << "Expected: " << ValTypeStr[Rhs.ExpValType]
-       << " , Got: " << ValTypeStr[Rhs.GotValType];
+    OS << "Expected: " << Rhs.ExpValType
+       << " , Got: " << Rhs.GotValType;
     break;
   case MismatchCategory::ValueTypes:
     OS << "Expected: types{";
     for (uint32_t I = 0; I < Rhs.ExpParams.size(); ++I) {
-      OS << ValTypeStr[Rhs.ExpParams[I]];
+      OS << Rhs.ExpParams[I];
       if (I < Rhs.ExpParams.size() - 1) {
         OS << " , ";
       }
     }
     OS << "} , Got: types{";
     for (uint32_t I = 0; I < Rhs.GotParams.size(); ++I) {
-      OS << ValTypeStr[Rhs.GotParams[I]];
+      OS << Rhs.GotParams[I];
       if (I < Rhs.GotParams.size() - 1) {
         OS << " , ";
       }
@@ -114,28 +114,28 @@ std::ostream &operator<<(std::ostream &OS, const struct InfoMismatch &Rhs) {
   case MismatchCategory::FunctionType:
     OS << "Expected: FuncType {params{";
     for (uint32_t I = 0; I < Rhs.ExpParams.size(); ++I) {
-      OS << ValTypeStr[Rhs.ExpParams[I]];
+      OS << Rhs.ExpParams[I];
       if (I < Rhs.ExpParams.size() - 1) {
         OS << " , ";
       }
     }
     OS << "} returns{";
     for (uint32_t I = 0; I < Rhs.ExpReturns.size(); ++I) {
-      OS << ValTypeStr[Rhs.ExpReturns[I]];
+      OS << Rhs.ExpReturns[I];
       if (I < Rhs.ExpReturns.size() - 1) {
         OS << " , ";
       }
     }
     OS << "}} , Got: FuncType {params{";
     for (uint32_t I = 0; I < Rhs.GotParams.size(); ++I) {
-      OS << ValTypeStr[Rhs.GotParams[I]];
+      OS << Rhs.GotParams[I];
       if (I < Rhs.GotParams.size() - 1) {
         OS << " , ";
       }
     }
     OS << "} returns{";
     for (uint32_t I = 0; I < Rhs.GotReturns.size(); ++I) {
-      OS << ValTypeStr[Rhs.GotReturns[I]];
+      OS << Rhs.GotReturns[I];
       if (I < Rhs.GotReturns.size() - 1) {
         OS << " , ";
       }
@@ -144,14 +144,14 @@ std::ostream &operator<<(std::ostream &OS, const struct InfoMismatch &Rhs) {
     break;
   case MismatchCategory::Table:
     OS << "Expected: TableType {RefType{"
-       << ValTypeStr[static_cast<ValType>(Rhs.ExpRefType)] << "} Limit{"
-       << Rhs.ExpLimMin;
+       << ValTypeCodeStr[static_cast<ValTypeCode>(Rhs.ExpRefType.getTypeCode())]
+       << "} Limit{" << Rhs.ExpLimMin;
     if (Rhs.ExpLimHasMax) {
       OS << " , " << Rhs.ExpLimMax;
     }
     OS << "}} , Got: TableType {RefType{"
-       << ValTypeStr[static_cast<ValType>(Rhs.GotRefType)] << "} Limit{"
-       << Rhs.GotLimMin;
+       << ValTypeCodeStr[static_cast<ValTypeCode>(Rhs.GotRefType.getTypeCode())]
+       << "} Limit{" << Rhs.GotLimMin;
     if (Rhs.GotLimHasMax) {
       OS << " , " << Rhs.GotLimMax;
     }
@@ -170,9 +170,9 @@ std::ostream &operator<<(std::ostream &OS, const struct InfoMismatch &Rhs) {
     break;
   case MismatchCategory::Global:
     OS << "Expected: GlobalType {Mutation{" << ValMutStr[Rhs.ExpValMut]
-       << "} ValType{" << ValTypeStr[Rhs.ExpValType]
+       << "} ValType{" << Rhs.ExpValType
        << "}} , Got: GlobalType {Mutation{" << ValMutStr[Rhs.GotValMut]
-       << "} ValType{" << ValTypeStr[Rhs.GotValType] << "}}";
+       << "} ValType{" << Rhs.GotValType << "}}";
     break;
   case MismatchCategory::Version:
     OS << "Expected: " << Rhs.ExpVersion << " , Got: " << Rhs.GotVersion;
@@ -194,43 +194,36 @@ std::ostream &operator<<(std::ostream &OS, const struct InfoInstruction &Rhs) {
   if (Rhs.Args.size() > 0) {
     OS << " , Args: [";
     for (uint32_t I = 0; I < Rhs.Args.size(); ++I) {
-      switch (Rhs.ArgsTypes[I]) {
-      case ValType::I32:
+      switch (Rhs.ArgsTypes[I].getTypeCode()) {
+      case ValTypeCode::I32:
         if (Rhs.IsSigned) {
           OS << Rhs.Args[I].get<int32_t>();
         } else {
           OS << Rhs.Args[I].get<uint32_t>();
         }
         break;
-      case ValType::I64:
+      case ValTypeCode::I64:
         if (Rhs.IsSigned) {
           OS << Rhs.Args[I].get<int64_t>();
         } else {
           OS << Rhs.Args[I].get<uint64_t>();
         }
         break;
-      case ValType::F32:
+      case ValTypeCode::F32:
         OS << Rhs.Args[I].get<float>();
         break;
-      case ValType::F64:
+      case ValTypeCode::F64:
         OS << Rhs.Args[I].get<double>();
         break;
-      case ValType::V128: {
+      case ValTypeCode::V128: {
         const auto Value = Rhs.Args[I].get<uint64x2_t>();
         OS << std::hex << Value[0] << Value[1];
         break;
       }
-      case ValType::FuncRef:
-        OS << ValTypeStr[Rhs.ArgsTypes[I]];
-        if (isNullRef(Rhs.Args[I])) {
-          OS << ":null";
-        } else {
-          OS << ":" << &Rhs.Args[I].get<uint64_t>();
-        }
-        break;
-      case ValType::ExternRef:
-        OS << ValTypeStr[Rhs.ArgsTypes[I]];
-        if (isNullRef(Rhs.Args[I])) {
+      case ValTypeCode::Ref:
+      case ValTypeCode::RefNull:
+        OS << Rhs.ArgsTypes[I];
+        if (Rhs.Args[I].get<RefVariant>().isNull()) {
           OS << ":null";
         } else {
           OS << ":" << &Rhs.Args[I].get<uint64_t>();

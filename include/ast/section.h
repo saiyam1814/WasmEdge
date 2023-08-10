@@ -64,13 +64,21 @@ private:
 class TypeSection : public Section {
 public:
   /// Getter of content vector.
-  Span<const FunctionType> getContent() const noexcept { return Content; }
-  std::vector<FunctionType> &getContent() noexcept { return Content; }
+  Span<const DefinedType> getContent() const noexcept { return Content; }
+  std::vector<DefinedType> &getContent() noexcept { return Content; }
+
+  Span<const uint32_t> getGroupEndIdx() const noexcept {
+    return RecursiveTypeGroupEndIdx;
+  }
+  std::vector<uint32_t> &getGroupEndIdx() noexcept {
+    return RecursiveTypeGroupEndIdx;
+  }
 
 private:
   /// \name Data of TypeSection.
   /// @{
-  std::vector<FunctionType> Content;
+  std::vector<DefinedType> Content;
+  std::vector<uint32_t> RecursiveTypeGroupEndIdx;
   /// @}
 };
 
@@ -106,13 +114,13 @@ private:
 class TableSection : public Section {
 public:
   /// Getter of content vector.
-  Span<const TableType> getContent() const noexcept { return Content; }
-  std::vector<TableType> &getContent() noexcept { return Content; }
+  Span<const Table> getContent() const noexcept { return Content; }
+  std::vector<Table> &getContent() noexcept { return Content; }
 
 private:
   /// \name Data of TableSection.
   /// @{
-  std::vector<TableType> Content;
+  std::vector<Table> Content;
   /// @}
 };
 

@@ -42,6 +42,16 @@ A(Seg_Element, "element segment")
 A(Seg_Code, "code segment")
 A(Seg_Data, "data segment")
 A(Type_Function, "function type")
+A(Type_Defined, "defined type")
+A(Type_Rec, "rec type")
+A(Type_Sub, "sub type")
+A(Type_Struct, "struct type")
+A(Type_Array, "array type")
+A(Type_Structure, "structure type")
+A(Type_Field, "field type")
+A(Type_Storage, "storage type")
+A(Type_ValType, "value type")
+A(Type_RefType, "reference type")
 A(Type_Limit, "limit")
 A(Type_Memory, "memory type")
 A(Type_Table, "table type")
@@ -72,11 +82,53 @@ O(Call, 0x10, "call")
 O(Call_indirect, 0x11, "call_indirect")
 O(Return_call, 0x12, "return_call")
 O(Return_call_indirect, 0x13, "return_call_indirect")
+O(Call_ref, 0x14, "call_ref")
+O(Return_call_ref, 0x15, "return_call_ref")
 
 // Reference Instructions
 O(Ref__null, 0xD0, "ref.null")
 O(Ref__is_null, 0xD1, "ref.is_null")
 O(Ref__func, 0xD2, "ref.func")
+O(Ref__as_non_null, 0xD3, "ref.as_non_null")
+O(Br_on_null, 0xD4, "br_on_null")
+O(Ref__eq, 0xD5, "ref.eq")
+O(Br_on_non_null, 0xD6, "br_on_non_null")
+
+// GC Instructions
+// Struct
+O(Struct__new_canon, 0xFB01, "struct.new_canon")
+O(Struct__new_canon_default, 0xFB02, "struct.new_canon_default")
+O(Struct__get, 0xFB03, "struct.get")
+O(Struct__get_s, 0xFB04, "struct.get_s")
+O(Struct__get_u, 0xFB05, "struct.get_u")
+O(Struct__set, 0xFB06, "struct.set")
+// Array
+O(Array__new_canon, 0xFB11, "array.new_canon")
+O(Array__new_canon_default, 0xFB12, "array.new_canon_default")
+O(Array__get, 0xFB13, "array.get")
+O(Array__get_s, 0xFB14, "array.get_s")
+O(Array__get_u, 0xFB15, "array.get_u")
+O(Array__set, 0xFB16, "array.set")
+O(Array__len, 0xFB17, "array.len")
+O(Array__new_canon_fixed, 0xFB19, "array.new_canon_fixed")
+O(Array__new_canon_data, 0xFB1B, "array.new_canon_data")
+O(Array__new_canon_elem, 0xFB1C, "array.new_canon_elem")
+// I31
+O(I31__new, 0xFB20, "i31.new")
+O(I31__get_s, 0xFB21, "i31.get_s")
+O(I31__get_u, 0xFB22, "i31.get_u")
+// Ref
+O(Ref__test, 0xFB40, "ref.test")
+O(Ref__cast, 0xFB41, "ref.cast")
+O(Br_on_cast, 0xFB42, "br_on_cast")
+O(Br_on_cast_fail, 0xFB43, "br_on_cast_fail")
+O(Ref__test_null, 0xFB48, "ref.test.null")
+O(Ref__cast_null, 0xFB49, "ref.cast.null")
+O(Br_on_cast_null, 0xFB4A, "br_on_cast.null")
+O(Br_on_cast_fail_null, 0xFB4B, "br_on_cast_fail.null")
+// Extern
+O(Extern__internalize, 0xFB70, "extern.internalize")
+O(Extern__externalize, 0xFB71, "extern.externalize")
 
 // Parametric Instructions
 O(Drop, 0x1A, "drop")
@@ -632,6 +684,7 @@ P(ExceptionHandling, "Exception handling")
 P(ExtendedConst, "Extended const")
 P(Threads, "Threads")
 P(FunctionReferences, "Typed Function References")
+P(GC, "GC proposal")
 #undef P
 #endif // UseProposal
 
@@ -742,6 +795,8 @@ E(IllegalGrammar, 0x39, "invalid wasm grammar")
 E(SharedMemoryNoMax, 0x3A, "shared memory must have maximum")
 // Intrinsics table not found
 E(IntrinsicsTableNotFound, 0x3B, "intrinsics table not found")
+// Malformed table (Ref-types proposal)
+E(MalformedTable, 0x3C, "malformed table")
 // @}
 
 // Validation phase
@@ -790,6 +845,10 @@ E(InvalidMemPages, 0x53, "memory size must be at most 65536 pages (4GiB)")
 E(InvalidStartFunc, 0x54, "start function")
 // Invalid lane index
 E(InvalidLaneIdx, 0x55, "invalid lane index")
+// Read unset local
+E(ReadUnsetLocal, 0x56, "read unset local")
+// Invalid Br ref type
+E(InvalidBrRefType, 0x57, "invalid br ref type")
 // @}
 
 // Instantiation phase
@@ -842,6 +901,8 @@ E(RefTypeMismatch, 0x8E, "reference type mismatch")
 E(UnalignedAtomicAccess, 0x8F, "unaligned atomic")
 // wait32/wait64 on unshared memory
 E(ExpectSharedMemory, 0x90, "expected shared memory")
+// cast null pointer to non null
+E(CastNullptrToNonNull, 0x91, "cast null pointer to non null")
 // @}
 
 #undef E
@@ -907,6 +968,8 @@ I(Lane, "lane")
 
 // enum_types.h
 
+// The raw ValType definition is deprecated. If you want to support more
+// ValType, add to the new definition of NumType or RefType.
 #ifdef UseValType
 #define V Line
 
@@ -933,6 +996,39 @@ N(V128, 0x7B)
 #undef N
 #endif // UseNumType
 
+#define NegativeOpCode(NUM) (0x80 + (NUM)) // Only used for gc proposal op code
+
+#ifdef UseHeapTypeCode
+#define H Line
+
+H(Func, 0x70)   // NegativeOpCode(-0x10)
+H(Extern, 0x6F) // NegativeOpCode(-0x11)
+H(Any, NegativeOpCode(-0x12))
+H(Eq, NegativeOpCode(-0x13))
+H(I31, NegativeOpCode(-0x16))
+H(NoFunc, NegativeOpCode(-0x17))
+H(NoExtern, NegativeOpCode(-0x18))
+H(Struct, NegativeOpCode(-0x19))
+H(Array, NegativeOpCode(-0x1A))
+H(None, NegativeOpCode(-0x1B))
+// This stands for type defined in wasm module. The value `0xFF` is an arbitary
+// value.
+H(Defined, 0xFF)
+
+#undef V
+#endif // UseHeapTypeCode
+
+#ifdef UseRefTypeCode
+#define R Line
+
+R(Ref, 0x6B)
+R(RefNull, 0x6C)
+
+#undef R
+#endif // UseRefTypeCode
+
+// The raw RefType definition is deprecated. If you want to support more
+// RefType, add to HeapType and RefTypeCode.
 #ifdef UseRefType
 #define R Line
 
@@ -961,5 +1057,28 @@ E(Global, 0x03U, "global")
 
 #undef E
 #endif // UseExternalType
+
+#ifdef UsePackedType
+#define T Line
+T(I8, NegativeOpCode(-0x06), "i8")
+T(I16, NegativeOpCode(-0x07), "i16")
+
+#undef T
+#endif // UsePackedType
+
+#ifdef UseDefinedTypeOpCode
+#define T Line
+
+T(Func, NegativeOpCode(-0x20), "func")
+T(Struct, NegativeOpCode(-0x21), "struct")
+T(Array, NegativeOpCode(-0x22), "array")
+T(Sub, NegativeOpCode(-0x30), "sub-type")
+T(Rec, NegativeOpCode(-0x31), "rec-type")
+T(SubFinal, NegativeOpCode(-0x32), "sub-final-type")
+
+#undef T
+#endif // UseDefinedTypeOpCode
+
+#undef NegativeOpCode
 
 // vim: ft=cpp

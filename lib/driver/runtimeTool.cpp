@@ -76,6 +76,9 @@ int Tool(int Argc, const char *Argv[]) noexcept {
       PO::Description("Enable Extended-const proposal"sv));
   PO::Option<PO::Toggle> PropThreads(
       PO::Description("Enable Threads proposal"sv));
+  PO::Option<PO::Toggle> PropFunctionReference(
+      PO::Description("Enable Function Reference proposal"sv));
+  PO::Option<PO::Toggle> PropGc(PO::Description("Enable GC proposal"sv));
   PO::Option<PO::Toggle> PropAll(PO::Description("Enable all features"sv));
 
   PO::Option<PO::Toggle> ConfEnableInstructionCounting(PO::Description(
@@ -129,6 +132,8 @@ int Tool(int Argc, const char *Argv[]) noexcept {
       .add_option("enable-tail-call"sv, PropTailCall)
       .add_option("enable-extended-const"sv, PropExtendConst)
       .add_option("enable-threads"sv, PropThreads)
+      .add_option("enable-function-reference"sv, PropFunctionReference)
+      .add_option("enable-gc"sv, PropGc)
       .add_option("enable-all"sv, PropAll)
       .add_option("time-limit"sv, TimeLim)
       .add_option("gas-limit"sv, GasLim)
@@ -178,6 +183,24 @@ int Tool(int Argc, const char *Argv[]) noexcept {
   }
   if (PropThreads.value()) {
     Conf.addProposal(Proposal::Threads);
+  }
+  if (PropFunctionReference.value()) {
+    if (PropRefTypes.value()) {
+      std::cerr << "Function Reference proposal is based on Reference Type "
+                   "proposal, which is disabled."
+                << std::endl;
+      return EXIT_FAILURE;
+    }
+    Conf.addProposal(Proposal::FunctionReferences);
+  }
+  if (PropGc.value()) {
+    if (!PropFunctionReference.value()) {
+      std::cerr << "GC proposal is based on Function References "
+                   "proposal, which is not enabled."
+                << std::endl;
+      return EXIT_FAILURE;
+    }
+    Conf.addProposal(Proposal::GC);
   }
   if (PropAll.value()) {
     Conf.addProposal(Proposal::MultiMemories);
@@ -240,9 +263,16 @@ int Tool(int Argc, const char *Argv[]) noexcept {
   if (auto Result = VM.loadWasm(InputPath.u8string()); !Result) {
     return EXIT_FAILURE;
   }
+
   if (auto Result = VM.validate(); !Result) {
     return EXIT_FAILURE;
   }
+
+//  if (Conf.hasProposal(Proposal::GC)) {
+//    std::cerr << "GC proposal is only ready for validation phase" << std::endl;
+//    return EXIT_FAILURE;
+//  }
+
   if (auto Result = VM.instantiate(); !Result) {
     return EXIT_FAILURE;
   }
@@ -330,35 +360,35 @@ int Tool(int Argc, const char *Argv[]) noexcept {
     }
 
     std::vector<ValVariant> FuncArgs;
-    std::vector<ValType> FuncArgTypes;
+    std::vector<FullValType> FuncArgTypes;
     for (size_t I = 0;
          I < FuncType.getParamTypes().size() && I + 1 < Args.value().size();
          ++I) {
-      switch (FuncType.getParamTypes()[I]) {
-      case ValType::I32: {
+      switch (FuncType.getParamTypes()[I].getTypeCode()) {
+      case ValTypeCode::I32: {
         const uint32_t Value =
             static_cast<uint32_t>(std::stol(Args.value()[I + 1]));
         FuncArgs.emplace_back(Value);
-        FuncArgTypes.emplace_back(ValType::I32);
+        FuncArgTypes.emplace_back(NumType::I32);
         break;
       }
-      case ValType::I64: {
+      case ValTypeCode::I64: {
         const uint64_t Value =
             static_cast<uint64_t>(std::stoll(Args.value()[I + 1]));
         FuncArgs.emplace_back(Value);
-        FuncArgTypes.emplace_back(ValType::I64);
+        FuncArgTypes.emplace_back(NumType::I64);
         break;
       }
-      case ValType::F32: {
+      case ValTypeCode::F32: {
         const float Value = std::stof(Args.value()[I + 1]);
         FuncArgs.emplace_back(Value);
-        FuncArgTypes.emplace_back(ValType::F32);
+        FuncArgTypes.emplace_back(NumType::F32);
         break;
       }
-      case ValType::F64: {
+      case ValTypeCode::F64: {
         const double Value = std::stod(Args.value()[I + 1]);
         FuncArgs.emplace_back(Value);
-        FuncArgTypes.emplace_back(ValType::F64);
+        FuncArgTypes.emplace_back(NumType::F64);
         break;
       }
       /// TODO: FuncRef and ExternRef
@@ -385,20 +415,20 @@ int Tool(int Argc, const char *Argv[]) noexcept {
     if (auto Result = AsyncResult.get()) {
       /// Print results.
       for (size_t I = 0; I < Result->size(); ++I) {
-        switch ((*Result)[I].second) {
-        case ValType::I32:
+        switch ((*Result)[I].second.getTypeCode()) {
+        case ValTypeCode::I32:
           std::cout << (*Result)[I].first.get<uint32_t>() << '\n';
           break;
-        case ValType::I64:
+        case ValTypeCode::I64:
           std::cout << (*Result)[I].first.get<uint64_t>() << '\n';
           break;
-        case ValType::F32:
+        case ValTypeCode::F32:
           std::cout << (*Result)[I].first.get<float>() << '\n';
           break;
-        case ValType::F64:
+        case ValTypeCode::F64:
           std::cout << (*Result)[I].first.get<double>() << '\n';
           break;
-        case ValType::V128:
+        case ValTypeCode::V128:
           std::cout << (*Result)[I].first.get<uint128_t>() << '\n';
           break;
         /// TODO: FuncRef and ExternRef

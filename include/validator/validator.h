@@ -37,6 +37,7 @@ private:
   /// Validate AST::Types
   Expect<void> validate(const AST::Limit &Lim);
   Expect<void> validate(const AST::TableType &Tab);
+  Expect<void> validate(const AST::Table &Tab);
   Expect<void> validate(const AST::MemoryType &Mem);
   /// GlobalType is always valid.
 
@@ -52,6 +53,7 @@ private:
   Expect<void> validate(const AST::ExportDesc &ExpDesc);
 
   /// Validate AST::Sections
+  Expect<void> validate(const AST::TypeSection &TypeSec);
   Expect<void> validate(const AST::ImportSection &ImportSec);
   Expect<void> validate(const AST::FunctionSection &FuncSec);
   Expect<void> validate(const AST::TableSection &TabSec);
@@ -65,7 +67,7 @@ private:
 
   /// Validate const expression
   Expect<void> validateConstExpr(AST::InstrView Instrs,
-                                 Span<const ValType> Returns);
+                                 Span<const FullValType> Returns);
 
   static inline const uint32_t LIMIT_MEMORYTYPE = 1U << 16;
   /// Proposal configure

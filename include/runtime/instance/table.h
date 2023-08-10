@@ -29,8 +29,10 @@ namespace Instance {
 class TableInstance {
 public:
   TableInstance() = delete;
-  TableInstance(const AST::TableType &TType) noexcept
-      : TabType(TType), Refs(TType.getLimit().getMin(), UnknownRef()) {}
+  TableInstance(const AST::TableType &TType,
+                const RefVariant InitValue) noexcept
+      : TabType(TType), Refs(TType.getLimit().getMin(), InitValue),
+        InitValue(InitValue) {}
 
   /// Get size of table.refs
   uint32_t getSize() const noexcept {
@@ -71,7 +73,7 @@ public:
     return true;
   }
   bool growTable(uint32_t Count) noexcept {
-    return growTable(Count, UnknownRef());
+    return growTable(Count, InitValue);
   }
 
   /// Get slice of Refs[Offset : Offset + Length - 1]
@@ -152,6 +154,7 @@ private:
   /// @{
   AST::TableType TabType;
   std::vector<RefVariant> Refs;
+  RefVariant InitValue;
   /// @}
 };
 

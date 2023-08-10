@@ -19,7 +19,8 @@ Expect<OpCode> Loader::loadOpCode() {
     return Unexpect(B1);
   }
 
-  if (Payload == 0xFCU || Payload == 0xFDU || Payload == 0xFEU) {
+  if (Payload == 0xFBU || Payload == 0xFCU || Payload == 0xFDU ||
+      Payload == 0xFEU) {
     // 2-bytes OpCode case.
     if (auto B2 = FMgr.readU32()) {
       Payload <<= 8;
@@ -205,13 +206,12 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
         if (TypeByte == 0x40) {
           Instr.setEmptyBlockType();
         } else {
-          ValType VType = static_cast<ValType>(TypeByte);
-          if (auto Check = checkValTypeProposals(VType, FMgr.getLastOffset(),
-                                                 ASTNodeAttr::Instruction);
-              unlikely(!Check)) {
-            return Unexpect(Check);
+          if (auto TypeRes = loadFullValType(TypeByte)) {
+            Instr.setBlockType(*TypeRes);
+          } else {
+            return logLoadError(TypeRes.error(), FMgr.getLastOffset(),
+                                ASTNodeAttr::Instruction);
           }
-          Instr.setBlockType(VType);
         }
       } else {
         // Type index case.
@@ -230,25 +230,29 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
 
   case OpCode::Br:
   case OpCode::Br_if:
+  case OpCode::Br_on_null:
+  case OpCode::Br_on_non_null:
     return readU32(Instr.getJump().TargetIndex);
 
   case OpCode::Br_table: {
     uint32_t VecCnt = 0;
-    // Read the vector of labels.
-    if (auto Res = readU32(VecCnt); unlikely(!Res)) {
-      return Unexpect(Res);
-    }
-    if (VecCnt / 2 > FMgr.getRemainSize()) {
-      // Too many label for Br_table.
-      return logLoadError(ErrCode::Value::IntegerTooLong, FMgr.getLastOffset(),
+    if (auto Res = loadVecCnt()) {
+      VecCnt = *Res;
+    } else {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
                           ASTNodeAttr::Instruction);
     }
     Instr.setLabelListSize(VecCnt + 1);
-    for (uint32_t I = 0; I < VecCnt; ++I) {
-      if (auto Res = readU32(Instr.getLabelList()[I].TargetIndex);
-          unlikely(!Res)) {
-        return Unexpect(Res);
-      }
+    // Read the vector of labels.
+    if (auto Res = loadVecContent(
+            Instr.getLabelList(),
+            [readU32](AST::Instruction::JumpDescriptor &JumpDesc) {
+              return readU32(JumpDesc.TargetIndex);
+            },
+            VecCnt);
+        unlikely(!Res)) {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
     }
     // Read default label.
     return readU32(Instr.getLabelList()[VecCnt].TargetIndex);
@@ -256,6 +260,8 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
 
   case OpCode::Call:
   case OpCode::Return_call:
+  case OpCode::Call_ref:
+  case OpCode::Return_call_ref:
     return readU32(Instr.getTargetIndex());
 
   case OpCode::Call_indirect:
@@ -280,23 +286,100 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
 
   // Reference Instructions.
   case OpCode::Ref__null:
-    if (auto Res = FMgr.readByte(); unlikely(!Res)) {
+    if (auto Res = loadHeapType()) {
+      Instr.setHeapType(*Res);
+    } else {
       return logLoadError(Res.error(), FMgr.getLastOffset(),
                           ASTNodeAttr::Instruction);
-    } else {
-      Instr.setRefType(static_cast<RefType>(*Res));
-      if (auto Check =
-              checkRefTypeProposals(Instr.getRefType(), FMgr.getLastOffset(),
-                                    ASTNodeAttr::Instruction);
-          unlikely(!Check)) {
-        return Unexpect(Check);
-      }
     }
     return {};
   case OpCode::Ref__is_null:
     return {};
+  case OpCode::Ref__as_non_null:
+    return {};
   case OpCode::Ref__func:
     return readU32(Instr.getTargetIndex());
+
+  // GC Instructions.
+  case OpCode::Struct__new_canon:
+  case OpCode::Struct__new_canon_default:
+  case OpCode::Array__new_canon:
+  case OpCode::Array__new_canon_default:
+  case OpCode::Array__get:
+  case OpCode::Array__get_s:
+  case OpCode::Array__get_u:
+  case OpCode::Array__set:
+    // read type index
+    return readU32(Instr.getTargetIndex());
+
+  case OpCode::Struct__get:
+  case OpCode::Struct__get_s:
+  case OpCode::Struct__get_u:
+  case OpCode::Struct__set:
+  case OpCode::Array__new_canon_data:
+  case OpCode::Array__new_canon_elem:
+    // read type index
+    if (auto Res = readU32(Instr.getTargetIndex()); !Res) {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    // read field index and store in source index
+    if (auto Res = readU32(Instr.getSourceIndex()); !Res) {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    return {};
+
+  case OpCode::Array__new_canon_fixed:
+    // read type index
+    if (auto Res = readU32(Instr.getTargetIndex()); !Res) {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    // read size N and store in stack offset
+    if (auto Res = readU32(Instr.getStackOffset()); !Res) {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    return {};
+
+  case OpCode::Ref__test:
+  case OpCode::Ref__test_null:
+  case OpCode::Ref__cast:
+  case OpCode::Ref__cast_null:
+    if (auto Res = loadHeapType()) {
+      Instr.setHeapType(*Res);
+    } else {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    return {};
+
+  case OpCode::Br_on_cast:
+  case OpCode::Br_on_cast_fail:
+  case OpCode::Br_on_cast_null:
+  case OpCode::Br_on_cast_fail_null:
+    // read label index
+    if (auto Res = readU32(Instr.getTargetIndex()); !Res) {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    if (auto Res = loadHeapType()) {
+      Instr.setJumpHeapType(*Res);
+    } else {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Instruction);
+    }
+    return {};
+
+  case OpCode::Ref__eq:
+  case OpCode::Array__len:
+  case OpCode::I31__new:
+  case OpCode::I31__get_s:
+  case OpCode::I31__get_u:
+  case OpCode::Extern__internalize:
+  case OpCode::Extern__externalize:
+    return {};
 
   // Parametric Instructions.
   case OpCode::Drop:
@@ -314,19 +397,12 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
     }
     Instr.setValTypeListSize(VecCnt);
     for (uint32_t I = 0; I < VecCnt; ++I) {
-      ValType VType;
-      if (auto T = FMgr.readByte(); unlikely(!T)) {
-        return logLoadError(T.error(), FMgr.getLastOffset(),
-                            ASTNodeAttr::Instruction);
+      if (auto Res = loadFullValType()) {
+        Instr.getValTypeList()[I] = *Res;
       } else {
-        VType = static_cast<ValType>(*T);
+        return logLoadError(Res.error(), FMgr.getLastOffset(),
+                            ASTNodeAttr::Instruction);
       }
-      if (auto Check = checkValTypeProposals(VType, FMgr.getLastOffset(),
-                                             ASTNodeAttr::Instruction);
-          unlikely(!Check)) {
-        return Unexpect(Check);
-      }
-      Instr.getValTypeList()[I] = VType;
     }
     return {};
   }
@@ -1001,7 +1077,8 @@ Expect<void> Loader::checkInstrProposals(OpCode Code,
                              Offset, ASTNodeAttr::Instruction);
     }
   } else if (Code == OpCode::Return_call ||
-             Code == OpCode::Return_call_indirect) {
+             Code == OpCode::Return_call_indirect ||
+             Code == OpCode::Return_call_ref) {
     // These instructions are for TailCall proposal.
     if (!Conf.hasProposal(Proposal::TailCall)) {
       return logNeedProposal(ErrCode::Value::IllegalOpCode, Proposal::TailCall,
@@ -1012,6 +1089,28 @@ Expect<void> Loader::checkInstrProposals(OpCode Code,
     // These instructions are for Thread proposal.
     if (!Conf.hasProposal(Proposal::Threads)) {
       return logNeedProposal(ErrCode::Value::IllegalOpCode, Proposal::Threads,
+                             Offset, ASTNodeAttr::Instruction);
+    }
+  } else if (Code == OpCode::Call_ref || Code == OpCode::Return_call_ref ||
+             Code == OpCode::Ref__as_non_null || Code == OpCode::Br_on_null ||
+             Code == OpCode::Br_on_non_null) {
+    if (!Conf.hasProposal(Proposal::FunctionReferences)) {
+      return logNeedProposal(ErrCode::Value::IllegalOpCode,
+                             Proposal::FunctionReferences, Offset,
+                             ASTNodeAttr::Instruction);
+    }
+  } else if (Code == OpCode::Ref__eq ||
+             (OpCode::Struct__new_canon <= Code &&
+              Code <= OpCode::Struct__set) ||
+             (OpCode::Array__new_canon <= Code &&
+              Code <= OpCode::Array__new_canon_elem) ||
+             (OpCode::I31__new <= Code && Code <= OpCode::I31__get_u) ||
+             (OpCode::Ref__test <= Code &&
+              Code <= OpCode::Br_on_cast_fail_null) ||
+             Code == OpCode::Extern__externalize ||
+             Code == OpCode::Extern__internalize) {
+    if (!Conf.hasProposal(Proposal::GC)) {
+      return logNeedProposal(ErrCode::Value::IllegalOpCode, Proposal::GC,
                              Offset, ASTNodeAttr::Instruction);
     }
   }

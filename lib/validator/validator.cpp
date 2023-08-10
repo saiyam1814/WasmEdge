@@ -21,8 +21,10 @@ Expect<void> Validator::validate(const AST::Module &Mod) {
   Checker.reset(true);
 
   // Register type definitions into FormChecker.
-  for (auto &Type : Mod.getTypeSection().getContent()) {
-    Checker.addType(Type);
+  if (auto Res = validate(Mod.getTypeSection()); !Res) {
+    spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Sec_Type));
+    spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Module));
+    return Unexpect(Res);
   }
 
   // Validate and register import section into FormChecker.
@@ -128,6 +130,20 @@ Expect<void> Validator::validate(const AST::Limit &Lim) {
 }
 
 // Validate Table type. See "include/validator/validator.h".
+Expect<void> Validator::validate(const AST::Table &Tab) {
+  if (auto Res =
+          validateConstExpr(Tab.getInitExpr().getInstrs(),
+                            {FullValType(Tab.getTableType().getRefType())});
+      !Res) {
+    return Unexpect(Res);
+  }
+  if (auto Res = validate(Tab.getTableType()); !Res) {
+    return Unexpect(Res);
+  }
+  return {};
+}
+
+// Validate Table type. See "include/validator/validator.h".
 Expect<void> Validator::validate(const AST::TableType &Tab) {
   // Validate table limits.
   if (auto Res = validate(Tab.getLimit()); !Res) {
@@ -169,7 +185,7 @@ Expect<void> Validator::validate(const AST::ElementSegment &ElemSeg) {
   // Check initialization expressions are const expressions.
   for (auto &Expr : ElemSeg.getInitExprs()) {
     if (auto Res = validateConstExpr(Expr.getInstrs(),
-                                     {ToValType(ElemSeg.getRefType())});
+                                     {FullValType(ElemSeg.getRefType())});
         !Res) {
       spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Expression));
       return Unexpect(Res);
@@ -190,14 +206,13 @@ Expect<void> Validator::validate(const AST::ElementSegment &ElemSeg) {
     if (TableVec[ElemSeg.getIdx()] != ElemSeg.getRefType()) {
       // Reference type not matched.
       spdlog::error(ErrCode::Value::TypeCheckFailed);
-      spdlog::error(ErrInfo::InfoMismatch(
-          static_cast<ValType>(TableVec[ElemSeg.getIdx()]),
-          static_cast<ValType>(ElemSeg.getRefType())));
+      spdlog::error(ErrInfo::InfoMismatch(TableVec[ElemSeg.getIdx()],
+                                          ElemSeg.getRefType()));
       return Unexpect(ErrCode::Value::TypeCheckFailed);
     }
     // Check table initialization is a const expression.
-    if (auto Res =
-            validateConstExpr(ElemSeg.getExpr().getInstrs(), {ValType::I32});
+    if (auto Res = validateConstExpr(ElemSeg.getExpr().getInstrs(),
+                                     {FullValType(ValType::I32)});
         !Res) {
       spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Expression));
       return Unexpect(Res);
@@ -209,26 +224,34 @@ Expect<void> Validator::validate(const AST::ElementSegment &ElemSeg) {
 // Validate Code segment. See "include/validator/validator.h".
 Expect<void> Validator::validate(const AST::CodeSegment &CodeSeg,
                                  const uint32_t TypeIdx) {
-  // Reset stack in FormChecker.
-  Checker.reset();
-  // Add parameters into this frame.
-  for (auto Val : Checker.getTypes()[TypeIdx].first) {
-    Checker.addLocal(Val);
-  }
-  // Add locals into this frame.
-  for (auto Val : CodeSeg.getLocals()) {
-    for (uint32_t Cnt = 0; Cnt < Val.first; ++Cnt) {
-      Checker.addLocal(Val.second);
+  const auto &Type = Checker.getTypes()[TypeIdx];
+  if (Type.isType<AST::FunctionType>()) {
+    const auto &FuncType = Type.asFunctionType();
+    // Reset stack in FormChecker.
+    Checker.reset();
+    // Add parameters into this frame.
+    for (auto Val : FuncType.getParamTypes()) {
+      // Local passed as function parameters should be initialized
+      Checker.addLocal(Val, true);
     }
+    // Add locals into this frame.
+    for (auto Val : CodeSeg.getLocals()) {
+      for (uint32_t Cnt = 0; Cnt < Val.first; ++Cnt) {
+        Checker.addLocal(Val.second, false);
+      }
+    }
+    // Validate function body expression.
+    if (auto Res = Checker.validate(CodeSeg.getExpr().getInstrs(),
+                                    FuncType.getReturnTypes());
+        !Res) {
+      spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Expression));
+      return Unexpect(Res);
+    }
+    return {};
+  } else {
+    spdlog::error("the code segment is not holding code of func type");
+    return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
   }
-  // Validate function body expression.
-  if (auto Res = Checker.validate(CodeSeg.getExpr().getInstrs(),
-                                  Checker.getTypes()[TypeIdx].second);
-      !Res) {
-    spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Expression));
-    return Unexpect(Res);
-  }
-  return {};
 }
 
 // Validate Data segment. See "include/validator/validator.h".
@@ -243,8 +266,8 @@ Expect<void> Validator::validate(const AST::DataSegment &DataSeg) {
       return Unexpect(ErrCode::Value::InvalidMemoryIdx);
     }
     // Check memory initialization is a const expression.
-    if (auto Res =
-            validateConstExpr(DataSeg.getExpr().getInstrs(), {ValType::I32});
+    if (auto Res = validateConstExpr(DataSeg.getExpr().getInstrs(),
+                                     {FullValType(ValType::I32)});
         !Res) {
       spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Expression));
       return Unexpect(Res);
@@ -349,6 +372,100 @@ Expect<void> Validator::validate(const AST::ExportDesc &ExpDesc) {
   return {};
 }
 
+Expect<void> Validator::validate(const AST::TypeSection &TypeSec) {
+  const auto validateValType = [](const FullValType &VType,
+                                  const uint32_t MaxTypeIdx) -> Expect<void> {
+    // MaxTypeIdx means the TypeIdx must be strictly less than MaxTypeIdx
+    if (VType.isRefType()) {
+      auto HeapType = VType.asRefType().getHeapType();
+      if (HeapType.getHTypeCode() == HeapTypeCode::Defined) {
+        if (HeapType.getDefinedTypeIdx() >= MaxTypeIdx) {
+          spdlog::error(ErrCode::Value::InvalidFuncTypeIdx);
+          spdlog::error(ErrInfo::InfoForbidIndex(
+              ErrInfo::IndexCategory::FunctionType,
+              HeapType.getDefinedTypeIdx(), MaxTypeIdx));
+          return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
+        }
+      }
+    }
+    return {};
+  };
+  const auto &Types = TypeSec.getContent();
+  uint32_t GroupStartIdx = 0;
+  for (auto GroupEndIdx : TypeSec.getGroupEndIdx()) {
+    for (uint32_t I = GroupStartIdx; I < GroupEndIdx; I++) {
+      const auto &Type = Types[I];
+      if (Type.isType<AST::FunctionType>()) {
+        const auto &FuncType = Type.asFunctionType();
+        for (auto &ParamType : FuncType.getParamTypes()) {
+          if (auto Res = validateValType(ParamType, GroupEndIdx); !Res) {
+            return Unexpect(Res);
+          }
+        }
+        for (auto &ParamType : FuncType.getReturnTypes()) {
+          if (auto Res = validateValType(ParamType, GroupEndIdx); !Res) {
+            return Unexpect(Res);
+          }
+        }
+      } else if (Type.isType<AST::ArrayType>()) {
+        const auto &ArrayType = Type.asArrayType();
+        const auto &StorageType = ArrayType.getFieldType().getStorageType();
+        if (StorageType.isValType()) {
+          if (auto Res = validateValType(StorageType.asValType(), GroupEndIdx);
+              !Res) {
+            return Unexpect(Res);
+          }
+        }
+      } else if (Type.isType<AST::StructType>()) {
+        const auto &StructType = Type.asStructType();
+        for (const auto &Field : StructType.getContent()) {
+          const auto &StorageType = Field.getStorageType();
+          if (StorageType.isValType()) {
+            if (auto Res =
+                    validateValType(StorageType.asValType(), GroupEndIdx);
+                !Res) {
+              return Unexpect(Res);
+            }
+          }
+        }
+      }
+      Checker.addType(Type);
+      GroupStartIdx = GroupEndIdx;
+    }
+  }
+
+  // Check subtype after all types have been added to checker
+  GroupStartIdx = 0;
+  for (auto GroupEndIdx : TypeSec.getGroupEndIdx()) {
+    for (uint32_t I = GroupStartIdx; I < GroupEndIdx; I++) {
+      const auto &Type = Types[I];
+      const auto &ParentTypeIdx = Type.getParentTypeIdx();
+      if (!ParentTypeIdx.empty()) {
+        if (ParentTypeIdx.size() > 1) {
+          spdlog::error("The GC MVP cannot have more than one parent type");
+          return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
+        }
+        auto ParentIdx = ParentTypeIdx[0];
+        if (ParentIdx >= I) {
+          spdlog::error("Parent idx should be defined before the current type");
+          return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
+        }
+        if (Types[ParentIdx].isFinal()) {
+          spdlog::error("parent type cannot be final");
+          return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
+        }
+        if (!Checker.match_type(Types[I], Types[ParentIdx])) {
+          spdlog::error("defined parent type idx cannot be the parent type");
+          return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
+        }
+      }
+      GroupStartIdx = GroupEndIdx;
+    }
+  }
+
+  return {};
+}
+
 // Validate Import section. See "include/validator/validator.h".
 Expect<void> Validator::validate(const AST::ImportSection &ImportSec) {
   for (auto &ImportDesc : ImportSec.getContent()) {
@@ -374,6 +491,11 @@ Expect<void> Validator::validate(const AST::FunctionSection &FuncSec) {
                                    static_cast<uint32_t>(TypeVec.size())));
       return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
     }
+    if (!TypeVec[TId].isType<AST::FunctionType>()) {
+      spdlog::error(ErrCode::Value::InvalidFuncTypeIdx);
+      spdlog::error("the type of function is not of FunctionType");
+      return Unexpect(ErrCode::Value::InvalidFuncTypeIdx);
+    }
     Checker.addFunc(TId);
   }
   return {};
@@ -383,7 +505,7 @@ Expect<void> Validator::validate(const AST::FunctionSection &FuncSec) {
 Expect<void> Validator::validate(const AST::TableSection &TabSec) {
   for (auto &Tab : TabSec.getContent()) {
     if (auto Res = validate(Tab)) {
-      Checker.addTable(Tab);
+      Checker.addTable(Tab.getTableType());
     } else {
       spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Type_Table));
       return Unexpect(Res);
@@ -480,14 +602,16 @@ Expect<void> Validator::validate(const AST::StartSection &StartSec) {
       return Unexpect(ErrCode::Value::InvalidFuncIdx);
     }
     auto TId = Checker.getFunctions()[FId];
-    auto &Type = Checker.getTypes()[TId];
-    if (Type.first.size() != 0 || Type.second.size() != 0) {
+    assuming(TId < Checker.getTypes().size());
+    assuming(Checker.getTypes()[TId].isType<AST::FunctionType>());
+    auto &Type = Checker.getTypes()[TId].asFunctionType();
+    if (Type.getParamTypes().size() != 0 || Type.getReturnTypes().size() != 0) {
       // Start function signature should be {}->{}
-      std::vector<ValType> Params, Returns;
-      for (auto &V : Type.first) {
+      std::vector<FullValType> Params, Returns;
+      for (auto &V : Type.getParamTypes()) {
         Params.push_back(Checker.VTypeToAST(V));
       }
-      for (auto &V : Type.second) {
+      for (auto &V : Type.getReturnTypes()) {
         Returns.push_back(Checker.VTypeToAST(V));
       }
       spdlog::error(ErrCode::Value::InvalidStartFunc);
@@ -519,7 +643,7 @@ Expect<void> Validator::validate(const AST::ExportSection &ExportSec) {
 
 // Validate constant expression. See "include/validator/validator.h".
 Expect<void> Validator::validateConstExpr(AST::InstrView Instrs,
-                                          Span<const ValType> Returns) {
+                                          Span<const FullValType> Returns) {
   for (auto &Instr : Instrs) {
     // Only these instructions are accepted.
     switch (Instr.getOpCode()) {
@@ -559,6 +683,13 @@ Expect<void> Validator::validateConstExpr(AST::InstrView Instrs,
       Checker.addRef(Instr.getTargetIndex());
       break;
     }
+    case OpCode::Array__new_canon:
+    case OpCode::Array__new_canon_default:
+    case OpCode::Array__new_canon_fixed:
+    case OpCode::Struct__new_canon_default:
+    case OpCode::Struct__new_canon:
+    case OpCode::I31__new:
+      break;
     case OpCode::I32__const:
     case OpCode::I64__const:
     case OpCode::F32__const:

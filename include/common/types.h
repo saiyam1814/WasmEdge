@@ -50,42 +50,31 @@ using uint8x16_t [[gnu::vector_size(16)]] = uint8_t;
 using doublex2_t [[gnu::vector_size(16)]] = double;
 using floatx4_t [[gnu::vector_size(16)]] = float;
 
-/// UnknownRef definition.
-struct UnknownRef {
-  uint64_t Value = 0;
-  UnknownRef() = default;
-};
-
 /// FuncRef definition.
 namespace Runtime::Instance {
 class FunctionInstance;
 }
-struct FuncRef {
-#if __INTPTR_WIDTH__ == 32
-  const uint32_t Padding = -1;
-#endif
-  const Runtime::Instance::FunctionInstance *Ptr = nullptr;
-  FuncRef() = default;
-  FuncRef(const Runtime::Instance::FunctionInstance *P) : Ptr(P) {}
-};
 
-/// ExternRef definition.
-struct ExternRef {
+/// NumType and RefType variant definitions.
+struct RefVariant {
 #if __INTPTR_WIDTH__ == 32
   const uint32_t Padding = -1;
 #endif
   void *Ptr = nullptr;
-  ExternRef() = default;
-  template <typename T> ExternRef(T *P) : Ptr(reinterpret_cast<void *>(P)) {}
+  RefVariant() = default;
+  template <typename T>
+  RefVariant(const T *P) : Ptr(reinterpret_cast<void *>(const_cast<T *>(P))) {}
+  template <typename T> RefVariant(T *P) : Ptr(reinterpret_cast<void *>(P)) {}
+  bool isNull() const { return Ptr == nullptr; }
+
+  template <typename T> T *asPtr() const { return reinterpret_cast<T *>(Ptr); }
 };
 
-/// NumType and RefType variant definitions.
-using RefVariant = Variant<UnknownRef, FuncRef, ExternRef>;
 using ValVariant =
     Variant<uint32_t, int32_t, uint64_t, int64_t, float, double, uint128_t,
             int128_t, uint64x2_t, int64x2_t, uint32x4_t, int32x4_t, uint16x8_t,
-            int16x8_t, uint8x16_t, int8x16_t, floatx4_t, doublex2_t, UnknownRef,
-            FuncRef, ExternRef>;
+            int16x8_t, uint8x16_t, int8x16_t, floatx4_t, doublex2_t,
+            RefVariant>;
 
 /// BlockType definition.
 struct BlockType {
@@ -96,14 +85,14 @@ struct BlockType {
   };
   TypeEnum TypeFlag;
   union {
-    ValType Type;
+    FullValType Type;
     uint32_t Idx;
   } Data;
   BlockType() = default;
-  BlockType(ValType VType) { setData(VType); }
+  BlockType(FullValType VType) { setData(VType); }
   BlockType(uint32_t Idx) { setData(Idx); }
   void setEmpty() { TypeFlag = TypeEnum::Empty; }
-  void setData(ValType VType) {
+  void setData(FullValType VType) {
     TypeFlag = TypeEnum::ValType;
     Data.Type = VType;
   }
@@ -114,14 +103,6 @@ struct BlockType {
   bool isEmpty() const { return TypeFlag == TypeEnum::Empty; }
   bool isValType() const { return TypeFlag == TypeEnum::ValType; }
 };
-
-/// NumType and RefType conversions.
-inline constexpr ValType ToValType(const NumType Val) noexcept {
-  return static_cast<ValType>(Val);
-}
-inline constexpr ValType ToValType(const RefType Val) noexcept {
-  return static_cast<ValType>(Val);
-}
 
 // <<<<<<<< Type definitions <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
@@ -166,8 +147,7 @@ inline constexpr const bool IsWasmFloatV = IsWasmFloat<T>::value;
 /// Return true if Wasm reference (funcref and externref).
 template <typename T>
 struct IsWasmRef
-    : std::bool_constant<std::is_same_v<RemoveCVRefT<T>, FuncRef> ||
-                         std::is_same_v<RemoveCVRefT<T>, ExternRef>> {};
+    : std::bool_constant<std::is_same_v<RemoveCVRefT<T>, RefVariant>> {};
 template <typename T>
 inline constexpr const bool IsWasmRefV = IsWasmRef<T>::value;
 
@@ -225,58 +205,52 @@ toUnsigned(T Val) {
 
 // >>>>>>>> Template to get value type from type >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-template <typename T> inline ValType ValTypeFromType() noexcept;
+template <typename T> inline FullValType ValTypeFromType() noexcept;
 
-template <> inline ValType ValTypeFromType<uint32_t>() noexcept {
-  return ValType::I32;
+template <> inline FullValType ValTypeFromType<uint32_t>() noexcept {
+  return FullValType(ValType::I32);
 }
-template <> inline ValType ValTypeFromType<int32_t>() noexcept {
-  return ValType::I32;
+template <> inline FullValType ValTypeFromType<int32_t>() noexcept {
+  return FullValType(ValType::I32);
 }
-template <> inline ValType ValTypeFromType<uint64_t>() noexcept {
-  return ValType::I64;
+template <> inline FullValType ValTypeFromType<uint64_t>() noexcept {
+  return FullValType(ValType::I64);
 }
-template <> inline ValType ValTypeFromType<int64_t>() noexcept {
-  return ValType::I64;
+template <> inline FullValType ValTypeFromType<int64_t>() noexcept {
+  return FullValType(ValType::I64);
 }
-template <> inline ValType ValTypeFromType<uint128_t>() noexcept {
-  return ValType::V128;
+template <> inline FullValType ValTypeFromType<uint128_t>() noexcept {
+  return FullValType(ValType::V128);
 }
-template <> inline ValType ValTypeFromType<int128_t>() noexcept {
-  return ValType::V128;
+template <> inline FullValType ValTypeFromType<int128_t>() noexcept {
+  return FullValType(ValType::V128);
 }
-template <> inline ValType ValTypeFromType<float>() noexcept {
-  return ValType::F32;
+template <> inline FullValType ValTypeFromType<float>() noexcept {
+  return FullValType(ValType::F32);
 }
-template <> inline ValType ValTypeFromType<double>() noexcept {
-  return ValType::F64;
-}
-template <> inline ValType ValTypeFromType<FuncRef>() noexcept {
-  return ValType::FuncRef;
-}
-template <> inline ValType ValTypeFromType<ExternRef>() noexcept {
-  return ValType::ExternRef;
+template <> inline FullValType ValTypeFromType<double>() noexcept {
+  return FullValType(ValType::F64);
 }
 
 // <<<<<<<< Template to get value type from type <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 // >>>>>>>> Const expression to generate value from value type >>>>>>>>>>>>>>>>>
 
-inline constexpr ValVariant ValueFromType(ValType Type) noexcept {
-  switch (Type) {
-  case ValType::I32:
+inline ValVariant ValueFromType(FullValType Type) noexcept {
+  switch (Type.getTypeCode()) {
+  case ValTypeCode::I32:
     return uint32_t(0U);
-  case ValType::I64:
+  case ValTypeCode::I64:
     return uint64_t(0U);
-  case ValType::F32:
+  case ValTypeCode::F32:
     return float(0.0F);
-  case ValType::F64:
+  case ValTypeCode::F64:
     return double(0.0);
-  case ValType::V128:
+  case ValTypeCode::V128:
     return uint128_t(0U);
-  case ValType::FuncRef:
-  case ValType::ExternRef:
-    return UnknownRef();
+  case ValTypeCode::Ref:
+  case ValTypeCode::RefNull:
+    return RefVariant();
   default:
     assumingUnreachable();
   }
@@ -286,36 +260,13 @@ inline constexpr ValVariant ValueFromType(ValType Type) noexcept {
 
 // >>>>>>>> Functions to retrieve reference inners >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-inline constexpr bool isNullRef(const ValVariant &Val) {
-  return Val.get<UnknownRef>().Value == 0;
-}
-inline constexpr bool isNullRef(const RefVariant &Val) {
-  return Val.get<UnknownRef>().Value == 0;
-}
-
-inline const Runtime::Instance::FunctionInstance *
-retrieveFuncRef(const ValVariant &Val) {
-  return reinterpret_cast<const Runtime::Instance::FunctionInstance *>(
-      Val.get<FuncRef>().Ptr);
-}
 inline const Runtime::Instance::FunctionInstance *
 retrieveFuncRef(const RefVariant &Val) {
-  return reinterpret_cast<const Runtime::Instance::FunctionInstance *>(
-      Val.get<FuncRef>().Ptr);
-}
-inline const Runtime::Instance::FunctionInstance *
-retrieveFuncRef(const FuncRef &Val) {
-  return reinterpret_cast<const Runtime::Instance::FunctionInstance *>(Val.Ptr);
+  return Val.asPtr<Runtime::Instance::FunctionInstance>();
 }
 
-template <typename T> inline T &retrieveExternRef(const ValVariant &Val) {
-  return *reinterpret_cast<T *>(Val.get<ExternRef>().Ptr);
-}
 template <typename T> inline T &retrieveExternRef(const RefVariant &Val) {
-  return *reinterpret_cast<T *>(Val.get<ExternRef>().Ptr);
-}
-template <typename T> inline T &retrieveExternRef(const ExternRef &Val) {
-  return *reinterpret_cast<T *>(Val.Ptr);
+  return *Val.asPtr<T>();
 }
 
 // <<<<<<<< Functions to retrieve reference inners <<<<<<<<<<<<<<<<<<<<<<<<<<<<<

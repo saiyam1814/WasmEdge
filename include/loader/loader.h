@@ -69,6 +69,9 @@ template <> inline ASTNodeAttr NodeAttrFromAST<AST::CodeSection>() noexcept {
 template <> inline ASTNodeAttr NodeAttrFromAST<AST::DataSection>() noexcept {
   return ASTNodeAttr::Sec_Data;
 }
+template <> inline ASTNodeAttr NodeAttrFromAST<AST::StructType>() noexcept {
+  return ASTNodeAttr::Type_Struct;
+}
 template <>
 inline ASTNodeAttr NodeAttrFromAST<AST::DataCountSection>() noexcept {
   return ASTNodeAttr::Sec_DataCount;
@@ -112,10 +115,6 @@ private:
     spdlog::error(ErrInfo::InfoAST(Node));
     return Unexpect(Code);
   }
-  Expect<ValType> checkValTypeProposals(ValType VType, uint64_t Off,
-                                        ASTNodeAttr Node) const noexcept;
-  Expect<RefType> checkRefTypeProposals(RefType RType, uint64_t Off,
-                                        ASTNodeAttr Node) const noexcept;
   Expect<void> checkInstrProposals(OpCode Code, uint64_t Offset) const noexcept;
   /// @}
 
@@ -152,28 +151,48 @@ private:
   }
   template <typename T, typename L>
   Expect<void> loadSectionContentVec(T &Sec, L &&Func) {
-    uint32_t VecCnt = 0;
-    // Read the vector size.
-    if (auto Res = FMgr.readU32()) {
-      VecCnt = *Res;
-      if (VecCnt / 2 > FMgr.getRemainSize()) {
-        return logLoadError(ErrCode::Value::IntegerTooLong,
-                            FMgr.getLastOffset(), NodeAttrFromAST<T>());
-      }
-      Sec.getContent().resize(VecCnt);
-    } else {
+    if (auto Res = loadVec(Sec.getContent(), std::move(Func)); !Res) {
       return logLoadError(Res.error(), FMgr.getLastOffset(),
                           NodeAttrFromAST<T>());
     }
+    return {};
+  }
 
-    // Sequently create the AST node T and read data.
+  Expect<uint32_t> loadVecCnt() {
+    // Read the vector size.
+    if (auto Res = FMgr.readU32()) {
+      // Question: why we used to divide by 2 here?
+      if (*Res / 2 > FMgr.getRemainSize()) {
+        return Unexpect(ErrCode::Value::IntegerTooLong);
+      }
+      return *Res;
+    } else {
+      return Unexpect(Res);
+    }
+  }
+
+  template <typename T, typename L>
+  Expect<void> loadVecContent(Span<T> Vec, L &&Func, uint32_t VecCnt) {
+    assert(Vec.size() >= VecCnt);
     for (uint32_t I = 0; I < VecCnt; ++I) {
-      if (auto Res = Func(Sec.getContent()[I]); !Res) {
-        spdlog::error(ErrInfo::InfoAST(NodeAttrFromAST<T>()));
+      if (auto Res = Func(Vec[I]); unlikely(!Res)) {
         return Unexpect(Res);
       }
     }
     return {};
+  }
+
+  template <typename T, typename L>
+  Expect<void> loadVec(std::vector<T> &Vec, L &&Func) {
+    uint32_t VecCnt;
+    if (auto Res = loadVecCnt()) {
+      Vec.clear();
+      Vec.resize(*Res);
+      VecCnt = *Res;
+    } else {
+      return Unexpect(Res);
+    }
+    return loadVecContent(Span<T>(Vec), std::move(Func), VecCnt);
   }
 
   /// \name Load AST nodes functions
@@ -199,9 +218,23 @@ private:
   Expect<void> loadDesc(AST::ImportDesc &ImpDesc);
   Expect<void> loadDesc(AST::ExportDesc &ExpDesc);
   Expect<void> loadLimit(AST::Limit &Lim);
+  Expect<FullValType> loadFullValType();
+  Expect<FullValType> loadFullValType(uint8_t TypeCode);
+  Expect<FullRefType> loadFullRefType();
+  Expect<HeapType> loadHeapType();
+  Expect<void> loadRecursiveTypeGroup(std::vector<AST::DefinedType> &);
+  Expect<AST::DefinedType> loadSubType();
+  Expect<AST::DefinedType> loadSubType(bool IsFinal);
+  Expect<AST::StructType> loadStructType();
+  Expect<AST::ArrayType> loadArrayType();
+  Expect<AST::StructureType> loadStructureType();
+  Expect<AST::StorageType> loadStorageType();
+
+  Expect<void> loadType(AST::FieldType &FieldType);
   Expect<void> loadType(AST::FunctionType &FuncType);
   Expect<void> loadType(AST::MemoryType &MemType);
   Expect<void> loadType(AST::TableType &TabType);
+  Expect<void> loadType(AST::Table &Table);
   Expect<void> loadType(AST::GlobalType &GlobType);
   Expect<void> loadExpression(AST::Expression &Expr,
                               std::optional<uint64_t> SizeBound = std::nullopt);

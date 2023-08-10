@@ -31,6 +31,7 @@ public:
     uint32_t StackEraseBegin;
     uint32_t StackEraseEnd;
     int32_t PCOffset;
+    HeapType HType;
   };
 
 public:
@@ -56,7 +57,7 @@ public:
       std::copy_n(Instr.Data.BrTable.LabelList, Data.BrTable.LabelListSize,
                   Data.BrTable.LabelList);
     } else if (Flags.IsAllocValTypeList) {
-      Data.SelectT.ValTypeList = new ValType[Data.SelectT.ValTypeListSize];
+      Data.SelectT.ValTypeList = new FullValType[Data.SelectT.ValTypeListSize];
       std::copy_n(Instr.Data.SelectT.ValTypeList, Data.SelectT.ValTypeListSize,
                   Data.SelectT.ValTypeList);
     }
@@ -90,7 +91,7 @@ public:
 
   /// Getter and setter of block type.
   BlockType getBlockType() const noexcept { return Data.Blocks.ResType; }
-  void setBlockType(ValType VType) noexcept {
+  void setBlockType(FullValType VType) noexcept {
     Data.Blocks.ResType.setData(VType);
   }
   void setBlockType(uint32_t Idx) noexcept { Data.Blocks.ResType.setData(Idx); }
@@ -105,8 +106,11 @@ public:
   void setJumpElse(const uint32_t Cnt) noexcept { Data.Blocks.JumpElse = Cnt; }
 
   /// Getter and setter of reference type.
-  RefType getRefType() const noexcept { return Data.ReferenceType; }
-  void setRefType(RefType RType) noexcept { Data.ReferenceType = RType; }
+  HeapType getHeapType() const noexcept { return Data.HType; }
+  void setHeapType(HeapType HType) noexcept { Data.HType = HType; }
+
+  HeapType getJumpHeapType() const noexcept { return Data.Jump.HType; }
+  void setJumpHeapType(HeapType HType) noexcept { Data.Jump.HType = HType; }
 
   /// Getter and setter of label list.
   void setLabelListSize(uint32_t Size) {
@@ -141,17 +145,17 @@ public:
     reset();
     if (Size > 0) {
       Data.SelectT.ValTypeListSize = Size;
-      Data.SelectT.ValTypeList = new ValType[Size];
+      Data.SelectT.ValTypeList = new FullValType[Size];
       Flags.IsAllocValTypeList = true;
     }
   }
-  Span<const ValType> getValTypeList() const noexcept {
-    return Span<const ValType>(Data.SelectT.ValTypeList,
-                               Data.SelectT.ValTypeListSize);
+  Span<const FullValType> getValTypeList() const noexcept {
+    return Span<const FullValType>(Data.SelectT.ValTypeList,
+                                   Data.SelectT.ValTypeListSize);
   }
-  Span<ValType> getValTypeList() noexcept {
-    return Span<ValType>(Data.SelectT.ValTypeList,
-                         Data.SelectT.ValTypeListSize);
+  Span<FullValType> getValTypeList() noexcept {
+    return Span<FullValType>(Data.SelectT.ValTypeList,
+                             Data.SelectT.ValTypeListSize);
   }
 
   /// Getter and setter of target index.
@@ -239,12 +243,12 @@ private:
       uint32_t LabelListSize;
       JumpDescriptor *LabelList;
     } BrTable;
-    // Type 5: RefType.
-    RefType ReferenceType;
+    // Type 5: HeapType.
+    HeapType HType;
     // Type 6: ValTypeList.
     struct {
       uint32_t ValTypeListSize;
-      ValType *ValTypeList;
+      FullValType *ValTypeList;
     } SelectT;
     // Type 7: TargetIdx, MemAlign, MemOffset, and MemLane.
     struct {

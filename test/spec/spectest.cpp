@@ -101,10 +101,10 @@ SpecTest::CommandID resolveCommand(std::string_view Name) {
 }
 
 // Helper function to parse parameters from json to vector of value.
-std::pair<std::vector<WasmEdge::ValVariant>, std::vector<WasmEdge::ValType>>
+std::pair<std::vector<WasmEdge::ValVariant>, std::vector<WasmEdge::FullValType>>
 parseValueList(const rapidjson::Value &Args) {
   std::vector<WasmEdge::ValVariant> Result;
-  std::vector<WasmEdge::ValType> ResultTypes;
+  std::vector<WasmEdge::FullValType> ResultTypes;
   Result.reserve(Args.Size());
   ResultTypes.reserve(Args.Size());
   for (const auto &Element : Args.GetArray()) {
@@ -114,19 +114,19 @@ parseValueList(const rapidjson::Value &Args) {
       const auto &Value = ValueNode.Get<std::string>();
       if (Type == "externref"sv) {
         if (Value == "null"sv) {
-          Result.emplace_back(WasmEdge::UnknownRef());
+          Result.emplace_back(WasmEdge::RefVariant());
         } else {
           // Add 0x1 uint32_t prefix in this externref index case.
-          Result.emplace_back(WasmEdge::ExternRef(
+          Result.emplace_back(WasmEdge::RefVariant(
               reinterpret_cast<void *>(std::stoul(Value) + 0x100000000ULL)));
         }
         ResultTypes.emplace_back(WasmEdge::ValType::ExternRef);
       } else if (Type == "funcref"sv) {
         if (Value == "null"sv) {
-          Result.emplace_back(WasmEdge::UnknownRef());
+          Result.emplace_back(WasmEdge::RefVariant());
         } else {
           // Add 0x1 uint32_t prefix in this funcref index case.
-          Result.emplace_back(WasmEdge::FuncRef(
+          Result.emplace_back(WasmEdge::RefVariant(
               reinterpret_cast<WasmEdge::Runtime::Instance::FunctionInstance *>(
                   std::stoul(Value) + 0x100000000ULL)));
         }
@@ -259,7 +259,7 @@ SpecTest::resolve(std::string_view Params) const {
 }
 
 bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
-                       const std::pair<ValVariant, ValType> &Got) const {
+                       const std::pair<ValVariant, FullValType> &Got) const {
   const auto &TypeStr = Expected.first;
   const auto &ValStr = Expected.second;
   bool IsV128 = (std::string_view(TypeStr).substr(0, 4) == "v128"sv);
@@ -267,62 +267,71 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
     // Handle NaN case
     // TODO: nan:canonical and nan:arithmetic
     if (TypeStr == "f32"sv) {
-      if (Got.second != ValType::F32) {
+      if (Got.second.getTypeCode() != ValTypeCode::F32) {
         return false;
       }
       return std::isnan(Got.first.get<float>());
     } else if (TypeStr == "f64"sv) {
-      if (Got.second != ValType::F64) {
+      if (Got.second.getTypeCode() != ValTypeCode::F64) {
         return false;
       }
       return std::isnan(Got.first.get<double>());
     }
   } else if (TypeStr == "funcref"sv) {
-    if (Got.second != ValType::FuncRef) {
+    if (Got.second.getTypeCode() != ValTypeCode::RefNull) {
+      return false;
+    }
+    if (Got.second.asRefType().getHeapType().getHTypeCode() !=
+        HeapTypeCode::Func) {
       return false;
     }
     if (ValStr == "null"sv) {
-      return WasmEdge::isNullRef(Got.first);
+      return Got.first.get<RefVariant>().isNull();
     } else {
-      if (WasmEdge::isNullRef(Got.first)) {
+      if (Got.first.get<RefVariant>().isNull()) {
         return false;
       }
       return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
-                 WasmEdge::retrieveFuncRef(Got.first))) ==
+                 WasmEdge::retrieveFuncRef(Got.first.get<RefVariant>()))) ==
              static_cast<uint32_t>(std::stoul(ValStr));
     }
   } else if (TypeStr == "externref"sv) {
-    if (Got.second != ValType::ExternRef) {
+    if (Got.second.getTypeCode() != ValTypeCode::RefNull) {
+      return false;
+    }
+    if (Got.second.asRefType().getHeapType().getHTypeCode() !=
+        HeapTypeCode::Extern) {
       return false;
     }
     if (ValStr == "null"sv) {
-      return WasmEdge::isNullRef(Got.first);
+      return Got.first.get<RefVariant>().isNull();
     } else {
-      if (WasmEdge::isNullRef(Got.first)) {
+      if (Got.first.get<RefVariant>().isNull()) {
         return false;
       }
       return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
-                 &WasmEdge::retrieveExternRef<uint32_t>(Got.first))) ==
+                 &WasmEdge::retrieveExternRef<uint32_t>(
+                     Got.first.get<RefVariant>()))) ==
              static_cast<uint32_t>(std::stoul(ValStr));
     }
   } else if (TypeStr == "i32"sv) {
-    if (Got.second != ValType::I32) {
+    if (Got.second != NumType::I32) {
       return false;
     }
     return Got.first.get<uint32_t>() == uint32_t(std::stoul(ValStr));
   } else if (TypeStr == "f32"sv) {
-    if (Got.second != ValType::F32) {
+    if (Got.second != NumType::F32) {
       return false;
     }
     // Compare the 32-bit pattern
     return Got.first.get<uint32_t>() == uint32_t(std::stoul(ValStr));
   } else if (TypeStr == "i64"sv) {
-    if (Got.second != ValType::I64) {
+    if (Got.second != NumType::I64) {
       return false;
     }
     return Got.first.get<uint64_t>() == uint64_t(std::stoull(ValStr));
   } else if (TypeStr == "f64"sv) {
-    if (Got.second != ValType::F64) {
+    if (Got.second != NumType::F64) {
       return false;
     }
     // Compare the 64-bit pattern
@@ -330,7 +339,7 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
   } else if (IsV128) {
     std::vector<std::string_view> Parts;
     std::string_view Ev = ValStr;
-    if (Got.second != ValType::V128) {
+    if (Got.second != NumType::V128) {
       return false;
     }
     for (std::string::size_type Begin = 0, End = Ev.find(' ');
@@ -437,7 +446,7 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
 
 bool SpecTest::compares(
     const std::vector<std::pair<std::string, std::string>> &Expected,
-    const std::vector<std::pair<ValVariant, ValType>> &Got) const {
+    const std::vector<std::pair<ValVariant, FullValType>> &Got) const {
   if (Expected.size() != Got.size()) {
     return false;
   }

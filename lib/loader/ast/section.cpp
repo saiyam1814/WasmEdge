@@ -55,10 +55,26 @@ Expect<void> Loader::loadSection(AST::CustomSection &Sec) {
 
 // Load vector of type section. See "include/loader/loader.h".
 Expect<void> Loader::loadSection(AST::TypeSection &Sec) {
-  return loadSectionContent(Sec, [this, &Sec]() {
-    return loadSectionContentVec(Sec, [this](AST::FunctionType &FuncType) {
-      return loadType(FuncType);
-    });
+  return loadSectionContent(Sec, [this, &Sec]() -> Expect<void> {
+    std::vector<std::vector<AST::DefinedType>> RecursiveTypeGroups;
+    auto Res = loadVec(RecursiveTypeGroups,
+                       [this](std::vector<AST::DefinedType> &Group) {
+                         return loadRecursiveTypeGroup(Group);
+                       });
+    if (!Res) {
+      return Unexpect(Res);
+    }
+
+    auto &Types = Sec.getContent();
+    auto &GroupEndIdx = Sec.getGroupEndIdx();
+
+    for (auto &&Group : std::move(RecursiveTypeGroups)) {
+      for (auto &&Type : std::move(Group)) {
+        Types.push_back(Type);
+      }
+      GroupEndIdx.push_back(Types.size());
+    }
+    return {};
   });
 }
 
@@ -91,7 +107,7 @@ Expect<void> Loader::loadSection(AST::FunctionSection &Sec) {
 Expect<void> Loader::loadSection(AST::TableSection &Sec) {
   return loadSectionContent(Sec, [this, &Sec]() {
     return loadSectionContentVec(
-        Sec, [this](AST::TableType &TabType) { return loadType(TabType); });
+        Sec, [this](AST::Table &Table) { return loadType(Table); });
   });
 }
 
