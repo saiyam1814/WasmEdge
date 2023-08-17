@@ -329,6 +329,19 @@ public:
       if (Code == OpCode::Return_call_ref && !hasProposal(Proposal::TailCall)) {
         return Proposal::TailCall;
       }
+    } else if (Code == OpCode::Ref__eq ||
+               (OpCode::Struct__new_canon <= Code &&
+                Code <= OpCode::Struct__set) ||
+               (OpCode::Array__new_canon <= Code &&
+                Code <= OpCode::Array__new_canon_elem) ||
+               (OpCode::I31__new <= Code && Code <= OpCode::I31__get_u) ||
+               (OpCode::Ref__test <= Code &&
+                Code <= OpCode::Br_on_cast_fail_null) ||
+               Code == OpCode::Extern__externalize ||
+               Code == OpCode::Extern__internalize) {
+      if (!hasProposal(Proposal::GC)) {
+        return Proposal::GC;
+      }
     }
     return {};
   }

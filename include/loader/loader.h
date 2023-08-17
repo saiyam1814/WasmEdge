@@ -70,6 +70,9 @@ template <> inline ASTNodeAttr NodeAttrFromAST<AST::CodeSection>() noexcept {
 template <> inline ASTNodeAttr NodeAttrFromAST<AST::DataSection>() noexcept {
   return ASTNodeAttr::Sec_Data;
 }
+template <> inline ASTNodeAttr NodeAttrFromAST<AST::StructType>() noexcept {
+  return ASTNodeAttr::Type_Struct;
+}
 template <>
 inline ASTNodeAttr NodeAttrFromAST<AST::DataCountSection>() noexcept {
   return ASTNodeAttr::Sec_DataCount;
@@ -200,6 +203,44 @@ private:
     return {};
   }
 
+  Expect<uint32_t> loadVecCnt() {
+    // Read the vector size.
+    if (auto Res = FMgr.readU32()) {
+      // Question: why we used to divide by 2 here?
+      if (*Res / 2 > FMgr.getRemainSize()) {
+        return Unexpect(ErrCode::Value::IntegerTooLong);
+      }
+      return *Res;
+    } else {
+      return Unexpect(Res);
+    }
+  }
+
+  template <typename T, typename L>
+  Expect<void> loadVecContent(Span<T> Vec, L &&Func, uint32_t VecCnt) {
+    assert(Vec.size() >= VecCnt);
+    for (uint32_t I = 0; I < VecCnt; ++I) {
+      if (auto Res = Func(Vec[I]); unlikely(!Res)) {
+        return Unexpect(Res);
+      }
+    }
+    return {};
+  }
+
+  template <typename T, typename L>
+  Expect<void> loadVec(std::vector<T> &Vec, L &&Func) {
+    uint32_t VecCnt;
+    if (auto Res = loadVecCnt()) {
+      Vec.clear();
+      Vec.resize(*Res);
+      VecCnt = *Res;
+    } else {
+      return Unexpect(Res);
+    }
+    return loadVecContent(Span<T>(Vec), std::move(Func), VecCnt);
+  }
+  /// @}
+
   /// \name Load AST nodes functions
   /// @{
   Expect<void> loadSection(AST::CustomSection &Sec);
@@ -227,6 +268,15 @@ private:
   Expect<ValType> loadRefType(ASTNodeAttr From);
   Expect<ValType> loadValType(ASTNodeAttr From);
   Expect<void> loadLimit(AST::Limit &Lim);
+  Expect<void> loadRecursiveTypeGroup(std::vector<AST::DefinedType> &);
+  Expect<AST::DefinedType> loadSubType();
+  Expect<AST::DefinedType> loadSubType(bool IsFinal);
+  Expect<AST::StructType> loadStructType();
+  Expect<AST::ArrayType> loadArrayType();
+  Expect<AST::StructureType> loadStructureType();
+  Expect<AST::StorageType> loadStorageType();
+
+  Expect<void> loadType(AST::FieldType &FieldType);
   Expect<void> loadType(AST::FunctionType &FuncType);
   Expect<void> loadType(AST::MemoryType &MemType);
   Expect<void> loadType(AST::TableType &TabType);

@@ -5701,8 +5701,8 @@ void Compiler::compile(const AST::TypeSection &TypeSec) noexcept {
                                   {Context->ExecCtxPtrTy, Context->Int8PtrTy,
                                    Context->Int8PtrTy, Context->Int8PtrTy},
                                   false);
-  const auto &FuncTypes = TypeSec.getContent();
-  const auto Size = FuncTypes.size();
+  const auto &DefinedTypes = TypeSec.getContent();
+  const auto Size = DefinedTypes.size();
   if (Size == 0) {
     return;
   }
@@ -5711,7 +5711,7 @@ void Compiler::compile(const AST::TypeSection &TypeSec) noexcept {
 
   // Iterate and compile types.
   for (size_t I = 0; I < Size; ++I) {
-    const auto &FuncType = FuncTypes[I];
+    const auto &FuncType = DefinedTypes[I].asFunctionType();
     const auto Name = fmt::format("t{}"sv, Context->FunctionTypes.size());
 
     // Check function type is unique

@@ -123,6 +123,178 @@ private:
   /// @}
 };
 
+class StorageType {
+public:
+  StorageType() noexcept = default;
+  StorageType(FullValType VType) noexcept : Type(VType) {
+    const auto GetSize = [](FullValType VType) {
+      switch (VType.getTypeCode()) {
+      case ValTypeCode::I32:
+        return sizeof(int32_t);
+      case ValTypeCode::I64:
+        return sizeof(int64_t);
+      case ValTypeCode::F32:
+        return sizeof(float);
+      case ValTypeCode::F64:
+        return sizeof(double);
+      case ValTypeCode::V128:
+        return sizeof(int128_t);
+      case ValTypeCode::Ref:
+        return sizeof(RefVariant);
+      case ValTypeCode::RefNull:
+        return sizeof(RefVariant);
+      }
+    };
+    Size = GetSize(VType);
+  }
+  StorageType(PackedType PType) noexcept : Type(PType) {
+    switch (asPackedType()) {
+    case PackedType::I16:
+      Size = sizeof(int16_t);
+      return;
+    case PackedType::I8:
+      Size = sizeof(int8_t);
+      return;
+    }
+  }
+
+  bool isPackedType() const { return std::holds_alternative<PackedType>(Type); }
+
+  bool isValType() const { return std::holds_alternative<FullValType>(Type); }
+
+  PackedType asPackedType() const { return std::get<PackedType>(Type); }
+
+  FullValType asValType() const { return std::get<FullValType>(Type); }
+
+  uint32_t size() const {
+    assuming(Size != 0);
+    return Size;
+  }
+
+  FullValType unpackedType() const {
+    if (isValType()) {
+      return asValType();
+    } else {
+      return ValType::I32;
+    }
+  }
+
+private:
+  std::variant<FullValType, PackedType> Type;
+  uint32_t Size;
+};
+
+class FieldType {
+public:
+  FieldType() noexcept = default;
+  FieldType(ValMut Mutability, StorageType Type) noexcept
+      : Mutability(Mutability), Type(Type) {}
+  ValMut getMutability() const noexcept { return Mutability; }
+
+  StorageType getStorageType() const noexcept { return Type; }
+
+private:
+  ValMut Mutability;
+  StorageType Type;
+};
+
+class ArrayType {
+public:
+  ArrayType() noexcept = default;
+  ArrayType(FieldType Type) noexcept : Type(Type) {}
+  FieldType getFieldType() const noexcept { return Type; }
+  bool isDefaultable() const noexcept {
+    return Type.getStorageType().unpackedType().isDefaultable();
+  }
+
+private:
+  FieldType Type;
+};
+
+class StructType {
+public:
+  StructType(std::vector<FieldType> &&TypeList) noexcept : Content(TypeList) {
+    Size = 0;
+    for (auto Type : TypeList) {
+      Offset.push_back(Size);
+      Size += Type.getStorageType().size();
+    }
+  }
+
+  Span<const FieldType> getContent() const noexcept { return Content; }
+  std::vector<FieldType> &getContent() noexcept { return Content; }
+
+  Span<const uint32_t> getOffset() const noexcept { return Offset; }
+
+  uint32_t size() const { return Size; }
+
+private:
+  std::vector<FieldType> Content;
+  std::vector<uint32_t> Offset;
+  uint32_t Size;
+};
+
+class StructureType {
+public:
+  StructureType() noexcept = default;
+  StructureType(FunctionType &&Type) : VariantType(Type) {}
+  StructureType(StructType &&Type) : VariantType(Type) {}
+  StructureType(ArrayType &&Type) : VariantType(Type) {}
+  template <typename T> const T &asType() const {
+    return std::get<T>(VariantType);
+  }
+  template <typename T> T &asType() { return std::get<T>(VariantType); }
+
+  template <typename T> bool isType() const {
+    return std::holds_alternative<T>(VariantType);
+  }
+
+private:
+  std::variant<FunctionType, StructType, ArrayType> VariantType;
+};
+
+class DefinedType {
+public:
+  DefinedType() noexcept = default;
+  DefinedType(StructType &&Type) noexcept
+      : IsFinal(true), ParentTypeIdx(), Type(std::move(Type)) {}
+  DefinedType(ArrayType &&Type) noexcept
+      : IsFinal(true), ParentTypeIdx(), Type(std::move(Type)) {}
+  DefinedType(FunctionType &&Type) noexcept
+      : IsFinal(true), ParentTypeIdx(), Type(std::move(Type)) {}
+  //  template <typename T>
+  //  DefinedType(T &&Type) noexcept
+  //      : IsFinal(true), ParentTypeIdx(), Type(std::move<T>(Type)) {}
+  DefinedType(bool IsFinal, std::vector<uint32_t> &&ParentTypeIdx,
+              StructureType &&Type) noexcept
+      : IsFinal(IsFinal), ParentTypeIdx(ParentTypeIdx), Type(Type) {}
+
+  const FunctionType &asFunctionType() const {
+    // TODO: check all usage of `asFunctionType` that each should ensure that
+    return Type.asType<FunctionType>();
+  }
+
+  FunctionType &asFunctionType() { return Type.asType<FunctionType>(); }
+
+  bool isFinal() const { return IsFinal; }
+
+  template <typename T> bool isType() const {
+    return Type.template isType<T>();
+  }
+
+  Span<const uint32_t> getParentTypeIdx() const { return ParentTypeIdx; }
+
+  const ArrayType &asArrayType() const { return Type.asType<ArrayType>(); }
+  const StructType &asStructType() const { return Type.asType<StructType>(); }
+
+  const StructureType &getType() const { return Type; }
+
+private:
+  bool IsFinal;
+  std::vector<uint32_t> ParentTypeIdx;
+  StructureType Type;
+};
+
 /// AST MemoryType node.
 class MemoryType {
 public:
