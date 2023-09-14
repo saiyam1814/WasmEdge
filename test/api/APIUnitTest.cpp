@@ -2008,7 +2008,7 @@ TEST(APICoreTest, Instance) {
   VType = WasmEdge_ValTypeGenExternRef();
   // TODO: Forcibly change to non-nullable. Refine this after providing the
   // corresponding API.
-  VType.Data[2] = WasmEdge_ValTypeCode_Ref;
+  VType.Data[2] = WasmEdge_TypeCode_Ref;
   TabType = WasmEdge_TableTypeCreate(
       VType, WasmEdge_Limit{/* HasMax */ true, /* Shared */ false, /* Min */ 10,
                             /* Max */ 10});
@@ -2221,7 +2221,7 @@ TEST(APICoreTest, Instance) {
   VType = WasmEdge_ValTypeGenExternRef();
   // TODO: Forcibly change to non-nullable. Refine this after providing the
   // corresponding API.
-  VType.Data[2] = WasmEdge_ValTypeCode_Ref;
+  VType.Data[2] = WasmEdge_TypeCode_Ref;
   GlobVType = WasmEdge_GlobalTypeCreate(VType, WasmEdge_Mutability_Var);
   Val = WasmEdge_ValueGenFuncRef(nullptr);
   GlobVCxt = WasmEdge_GlobalInstanceCreate(GlobVType, Val);
