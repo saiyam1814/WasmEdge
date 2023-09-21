@@ -6,6 +6,31 @@
 namespace WasmEdge {
 namespace Loader {
 
+// Serialize table segment. See "include/loader/serialize.h".
+Expect<void>
+Serializer::serializeSegment(const AST::TableSegment &Seg,
+                             std::vector<uint8_t> &OutVec) const noexcept {
+  // Table segment: tabletype + expr.
+  if (Seg.getExpr().getInstrs().size() > 0) {
+    if (!Conf.hasProposal(Proposal::FunctionReferences)) {
+      return logNeedProposal(ErrCode::Value::MalformedTable,
+                             Proposal::FunctionReferences,
+                             ASTNodeAttr::Seg_Table);
+    }
+    OutVec.push_back(0x40);
+    OutVec.push_back(0x00);
+  }
+  if (auto Res = serializeType(Seg.getTableType(), OutVec); unlikely(!Res)) {
+    spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Seg_Table));
+    return Unexpect(Res);
+  }
+  if (auto Res = serializeExpression(Seg.getExpr(), OutVec); unlikely(!Res)) {
+    spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Seg_Table));
+    return Unexpect(Res);
+  }
+  return {};
+}
+
 // Serialize global segment. See "include/loader/serialize.h".
 Expect<void>
 Serializer::serializeSegment(const AST::GlobalSegment &Seg,
@@ -84,12 +109,11 @@ Serializer::serializeSegment(const AST::ElementSegment &Seg,
   if (Mode & 0x03) {
     if (Mode & 0x04) {
       // Serialize RefType.
-      if (auto Res =
-              checkRefTypeProposals(Seg.getRefType(), ASTNodeAttr::Seg_Element);
+      if (auto Res = serializeRefType(Seg.getRefType(),
+                                      ASTNodeAttr::Seg_Element, Result);
           unlikely(!Res)) {
         return Unexpect(Res);
       }
-      Result.push_back(static_cast<uint8_t>(Seg.getRefType()));
     } else {
       // Serialize ElemKind.
       Result.push_back(0x00);
@@ -124,12 +148,12 @@ Serializer::serializeSegment(const AST::CodeSegment &Seg,
   std::vector<uint8_t> Result;
   serializeU32(static_cast<uint32_t>(Seg.getLocals().size()), Result);
   for (auto &Locals : Seg.getLocals()) {
-    if (auto Res = checkValTypeProposals(Locals.second, ASTNodeAttr::Seg_Code);
+    serializeU32(Locals.first, Result);
+    if (auto Res =
+            serializeValType(Locals.second, ASTNodeAttr::Seg_Code, Result);
         unlikely(!Res)) {
       return Unexpect(Res);
     }
-    serializeU32(Locals.first, Result);
-    Result.push_back(static_cast<uint8_t>(Locals.second));
   }
   if (auto Res = serializeExpression(Seg.getExpr(), Result); unlikely(!Res)) {
     spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Expression));

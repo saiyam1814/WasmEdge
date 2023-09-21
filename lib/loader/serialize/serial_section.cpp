@@ -60,8 +60,8 @@ Expect<std::vector<uint8_t>>
 Serializer::serializeSection(const AST::TableSection &Sec) const noexcept {
   // Table section: 0x04 + size:u32 + content:vec(tabletype).
   return serializeSectionContent(
-      Sec, 0x04U, [=](const AST::TableType &R, std::vector<uint8_t> &V) {
-        return serializeType(R, V);
+      Sec, 0x04U, [=](const AST::TableSegment &R, std::vector<uint8_t> &V) {
+        return serializeSegment(R, V);
       });
 }
 
