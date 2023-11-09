@@ -53,10 +53,10 @@ Expect<void> Executor::runMemoryFenceOp() {
 
 Expect<uint32_t>
 Executor::atomicNotify(Runtime::Instance::MemoryInstance &MemInst,
-                       uint32_t Address, uint32_t Count) noexcept {
+                       uint64_t Address, uint32_t Count) noexcept {
   // The error message should be handled by the caller, or the AOT mode will
   // produce the duplicated messages.
-  if (auto *AtomicObj = MemInst.getPointer<std::atomic<uint32_t> *>(Address);
+  if (auto *AtomicObj = MemInst.getPointer<std::atomic<uint64_t> *>(Address);
       !AtomicObj) {
     return Unexpect(ErrCode::Value::MemoryOutOfBounds);
   }

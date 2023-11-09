@@ -704,11 +704,11 @@ public:
 
 private:
   template <typename T>
-  Expect<uint32_t> atomicWait(Runtime::Instance::MemoryInstance &MemInst,
-                              uint32_t Address, T Expected,
+  Expect<uint64_t> atomicWait(Runtime::Instance::MemoryInstance &MemInst,
+                              uint64_t Address, T Expected,
                               int64_t Timeout) noexcept;
   Expect<uint32_t> atomicNotify(Runtime::Instance::MemoryInstance &MemInst,
-                                uint32_t Address, uint32_t Count) noexcept;
+                                uint64_t Address, uint32_t Count) noexcept;
   void atomicNotifyAll() noexcept;
 
   struct Waiter {
@@ -766,6 +766,53 @@ private:
   /// Executor Host Function Handler
   HostFuncHandler HostFuncHelper = {};
 };
+
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2019-2022 Second State INC
+
+#include "executor/executor.h"
+#include "runtime/instance/memory.h"
+
+#include <cstdint>
+
+// If `memoryOffset + instruction Value` is overflow, it's an out of bound
+// access, trap.
+template <uint32_t BitWidth>
+Expect<void> checkOutOfBound(const Runtime::Instance::MemoryInstance &MemInst,
+                             const AST::Instruction &Instr, uint64_t Val) {
+  switch (MemInst.getMemoryType().getIdxType()) {
+  case AST::MemoryType::IndexType::I64: {
+    if (Val > std::numeric_limits<uint64_t>::max() - Instr.getMemoryOffset()) {
+      spdlog::error(ErrCode::Value::MemoryOutOfBounds);
+      spdlog::error(ErrInfo::InfoBoundary(Val + Instr.getMemoryOffset(),
+                                          BitWidth / 8, MemInst.getBoundIdx()));
+      spdlog::error(
+          ErrInfo::InfoInstruction(Instr.getOpCode(), Instr.getOffset()));
+      return Unexpect(ErrCode::Value::MemoryOutOfBounds);
+    }
+    break;
+  }
+  case AST::MemoryType::IndexType::I32:
+  default: {
+    if (static_cast<uint32_t>(Val) >
+        std::numeric_limits<uint32_t>::max() -
+            static_cast<uint32_t>(Instr.getMemoryOffset())) {
+      spdlog::error(ErrCode::Value::MemoryOutOfBounds);
+      spdlog::error(ErrInfo::InfoBoundary(
+          Val + static_cast<uint32_t>(Instr.getMemoryOffset()), BitWidth / 8,
+          MemInst.getBoundIdx()));
+      spdlog::error(
+          ErrInfo::InfoInstruction(Instr.getOpCode(), Instr.getOffset()));
+      return Unexpect(ErrCode::Value::MemoryOutOfBounds);
+    }
+    break;
+  }
+  }
+  return {};
+}
+
+uint64_t valToIndex(WasmEdge::ValVariant &Val,
+                    AST::MemoryType::IndexType IdxType);
 
 } // namespace Executor
 } // namespace WasmEdge

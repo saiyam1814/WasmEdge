@@ -245,6 +245,7 @@ static const TestsuiteProposal TestsuiteProposals[] = {
     {"threads"sv, {Proposal::Threads}},
     {"function-references"sv,
      {Proposal::FunctionReferences, Proposal::TailCall}},
+    {"memory64"sv, {Proposal::Memory64}},
 };
 
 } // namespace
@@ -599,7 +600,11 @@ void SpecTest::run(std::string_view Proposal, std::string_view UnitName) {
     } else {
       // Check value.
       EXPECT_TRUE(
-          stringContains(Text, WasmEdge::ErrCodeStr[Res.error().getEnum()]));
+          stringContains(Text, WasmEdge::ErrCodeStr[Res.error().getEnum()]))
+          << "spec " << ModName << "/" << std::string(Field) << " should work"
+          << "\n\terror should be: \"" << Text << "\""
+          << "\n\tbut got: \"" << WasmEdge::ErrCodeStr[Res.error().getEnum()]
+          << "\"";
     }
   };
   auto TrapValidate = [&](const std::string &Filename,
