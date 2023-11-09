@@ -398,7 +398,8 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
           }
         } else {
           const uint32_t V1 = VI[I];
-          const uint32_t V2 = std::stoul(std::string(Parts[I]));
+          const uint32_t V2 =
+              static_cast<uint32_t>(std::stoul(std::string(Parts[I])));
           if (V1 != V2) {
             return false;
           }
@@ -473,7 +474,8 @@ bool SpecTest::compare(const std::pair<std::string, std::string> &Expected,
 #endif
       for (size_t I = 0; I < 4; ++I) {
         const uint32_t V1 = V[I];
-        const uint32_t V2 = std::stoul(std::string(Parts[I]));
+        const uint32_t V2 =
+            static_cast<uint32_t>(std::stoul(std::string(Parts[I])));
         if (V1 != V2) {
           return false;
         }

@@ -18,7 +18,7 @@ namespace {
 
 // Helper function for printing error log of index out of range.
 auto logOutOfRange(ErrCode Code, ErrInfo::IndexCategory Cate, uint32_t Idx,
-                   uint32_t Bound) {
+                   uint64_t Bound) {
   spdlog::error(Code);
   spdlog::error(ErrInfo::InfoForbidIndex(Cate, Idx, Bound));
   return Unexpect(Code);

@@ -236,8 +236,8 @@ public:
 
   /// Get array of object at specific offset of memory.
   template <typename T>
-  Span<T> getSpan(uint64_t Offset, uint32_t Size) const noexcept {
-    uint32_t ByteSize = static_cast<uint32_t>(sizeof(T) * Size);
+  Span<T> getSpan(uint64_t Offset, uint64_t Size) const noexcept {
+    uint64_t ByteSize = sizeof(T) * Size;
     if (unlikely(!checkAccessBound(Offset, ByteSize))) {
       return Span<T>();
     }
