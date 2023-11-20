@@ -22,6 +22,8 @@
 #define A Line
 
 A(Component, "component")
+A(Sec_Alias, "component alias section")
+A(Sort, "sort")
 A(Module, "module")
 A(Sec_Custom, "custom section")
 A(Sec_Type, "type section")
@@ -736,6 +738,8 @@ E(IllegalGrammar, 0x39, "invalid wasm grammar")
 E(SharedMemoryNoMax, 0x3A, "shared memory must have maximum")
 // Intrinsics table not found
 E(IntrinsicsTableNotFound, 0x3B, "intrinsics table not found")
+// Malformed sort
+E(MalformedSort, 0x3C, "malformed sort")
 // @}
 
 // Validation phase
