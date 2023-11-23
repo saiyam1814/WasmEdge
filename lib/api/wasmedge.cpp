@@ -1343,14 +1343,10 @@ WasmEdge_ImportTypeGetFunctionType(const WasmEdge_ASTModuleContext *ASTCxt,
       fromImpTypeCxt(Cxt)->getExternalType() ==
           WasmEdge::ExternalType::Function) {
     uint32_t Idx = fromImpTypeCxt(Cxt)->getExternalFuncTypeIdx();
-    const auto &DefinedType =
-        fromASTModCxt(ASTCxt)->getTypeSection().getContent();
-    if (Idx >= DefinedType.size()) {
-      return nullptr;
+    auto SubTypes = fromASTModCxt(ASTCxt)->getTypeSection().getContent();
+    if (Idx < SubTypes.size() && SubTypes[Idx].getCompositeType().isFunc()) {
+      return toFuncTypeCxt(&(SubTypes[Idx].getCompositeType().getFuncType()));
     }
-    // If the import type context has passed the validation check, this should
-    // be of FunctionType.
-    return toFuncTypeCxt(&DefinedType[Idx].asFunctionType());
   }
   return nullptr;
 }
@@ -1418,7 +1414,6 @@ WasmEdge_ExportTypeGetFunctionType(const WasmEdge_ASTModuleContext *ASTCxt,
           WasmEdge::ExternalType::Function) {
     auto ImpDescs = fromASTModCxt(ASTCxt)->getImportSection().getContent();
     auto FuncIdxs = fromASTModCxt(ASTCxt)->getFunctionSection().getContent();
-    auto FuncTypes = fromASTModCxt(ASTCxt)->getTypeSection().getContent();
     uint32_t ExtIdx = fromExpTypeCxt(Cxt)->getExternalIndex();
 
     // Indexing the import descriptions.
@@ -1441,16 +1436,13 @@ WasmEdge_ExportTypeGetFunctionType(const WasmEdge_ASTModuleContext *ASTCxt,
       // Invalid function index.
       return nullptr;
     }
-    uint32_t TypeIdx = FuncIdxs[ExtIdx];
-    // Get the function type
-    const auto &DefinedTypes =
-        fromASTModCxt(ASTCxt)->getTypeSection().getContent();
-    if (TypeIdx >= DefinedTypes.size()) {
-      return nullptr;
+    // Get the function type.
+    auto SubTypes = fromASTModCxt(ASTCxt)->getTypeSection().getContent();
+    if (TypeIdx < SubTypes.size() &&
+        SubTypes[TypeIdx].getCompositeType().isFunc()) {
+      return toFuncTypeCxt(
+          &(SubTypes[TypeIdx].getCompositeType().getFuncType()));
     }
-    // If the import type context has passed the validation check, this should
-    // be of FunctionType.
-    return toFuncTypeCxt(&DefinedTypes[TypeIdx].asFunctionType());
   }
   return nullptr;
 }
@@ -2530,7 +2522,7 @@ WASMEDGE_CAPI_EXPORT WasmEdge_Result WasmEdge_GlobalInstanceSetValue(
             return Unexpect(WasmEdge::ErrCode::Value::SetValueErrorType);
           }
         }
-        fromGlobCxt(Cxt)->getValue() = Val;
+        fromGlobCxt(Cxt)->setValue(Val);
         return {};
       },
       EmptyThen, Cxt);

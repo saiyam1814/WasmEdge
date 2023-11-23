@@ -242,12 +242,10 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
   case OpCode::Br_table: {
     uint32_t VecCnt = 0;
     // Read the vector of labels.
-    if (auto Res = readU32(VecCnt); unlikely(!Res)) {
-      return Unexpect(Res);
-    }
-    if (VecCnt / 2 > FMgr.getRemainSize()) {
-      // Too many label for Br_table.
-      return logLoadError(ErrCode::Value::IntegerTooLong, FMgr.getLastOffset(),
+    if (auto Res = loadVecCnt()) {
+      VecCnt = *Res;
+    } else {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
                           ASTNodeAttr::Instruction);
     }
     Instr.setLabelListSize(VecCnt + 1);
@@ -289,6 +287,8 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
 
   // Reference Instructions.
   case OpCode::Ref__null:
+  case OpCode::Ref__test_null:
+  case OpCode::Ref__cast_null:
     if (auto Res = loadHeapType(TypeCode::RefNull, ASTNodeAttr::Instruction)) {
       Instr.setValType(*Res);
     } else {
@@ -296,71 +296,47 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
       return Unexpect(Res);
     }
     return {};
+  case OpCode::Ref__test:
+  case OpCode::Ref__cast:
+    if (auto Res = loadHeapType(TypeCode::Ref, ASTNodeAttr::Instruction)) {
+      Instr.setValType(*Res);
+    } else {
+      // The AST node information is handled.
+      return Unexpect(Res);
+    }
+    return {};
   case OpCode::Ref__is_null:
+  case OpCode::Ref__eq:
   case OpCode::Ref__as_non_null:
     return {};
   case OpCode::Ref__func:
-    return readU32(Instr.getTargetIndex());
-
-  // GC Instructions.
-  case OpCode::Struct__new_canon:
-  case OpCode::Struct__new_canon_default:
-  case OpCode::Array__new_canon:
-  case OpCode::Array__new_canon_default:
+  case OpCode::Struct__new:
+  case OpCode::Struct__new_default:
+  case OpCode::Array__new:
+  case OpCode::Array__new_default:
   case OpCode::Array__get:
   case OpCode::Array__get_s:
   case OpCode::Array__get_u:
   case OpCode::Array__set:
-    // read type index
+  case OpCode::Array__fill:
     return readU32(Instr.getTargetIndex());
-
   case OpCode::Struct__get:
   case OpCode::Struct__get_s:
   case OpCode::Struct__get_u:
   case OpCode::Struct__set:
-  case OpCode::Array__new_canon_data:
-  case OpCode::Array__new_canon_elem:
-    // read type index
-    if (auto Res = readU32(Instr.getTargetIndex()); !Res) {
-      return logLoadError(Res.error(), FMgr.getLastOffset(),
-                          ASTNodeAttr::Instruction);
+  case OpCode::Array__new_fixed:
+  case OpCode::Array__new_data:
+  case OpCode::Array__new_elem:
+  case OpCode::Array__copy:
+  case OpCode::Array__init_data:
+  case OpCode::Array__init_elem:
+    if (auto Res = readU32(Instr.getTargetIndex()); unlikely(!Res)) {
+      return Unexpect(Res);
     }
-    // read field index and store in source index
-    if (auto Res = readU32(Instr.getSourceIndex()); !Res) {
-      return logLoadError(Res.error(), FMgr.getLastOffset(),
-                          ASTNodeAttr::Instruction);
-    }
-    return {};
-
-  case OpCode::Array__new_canon_fixed:
-    // read type index
-    if (auto Res = readU32(Instr.getTargetIndex()); !Res) {
-      return logLoadError(Res.error(), FMgr.getLastOffset(),
-                          ASTNodeAttr::Instruction);
-    }
-    // read size N and store in stack offset
-    if (auto Res = readU32(Instr.getStackOffset()); !Res) {
-      return logLoadError(Res.error(), FMgr.getLastOffset(),
-                          ASTNodeAttr::Instruction);
-    }
-    return {};
-
-  case OpCode::Ref__test:
-  case OpCode::Ref__test_null:
-  case OpCode::Ref__cast:
-  case OpCode::Ref__cast_null:
-    if (auto Res = loadHeapType()) {
-      Instr.setHeapType(*Res);
-    } else {
-      return logLoadError(Res.error(), FMgr.getLastOffset(),
-                          ASTNodeAttr::Instruction);
-    }
-    return {};
-
+    return readU32(Instr.getSourceIndex());
   case OpCode::Br_on_cast:
   case OpCode::Br_on_cast_fail:
-  case OpCode::Br_on_cast_null:
-  case OpCode::Br_on_cast_fail_null:
+  /* TODO: GC
     // read label index
     if (auto Res = readU32(Instr.getTargetIndex()); !Res) {
       return logLoadError(Res.error(), FMgr.getLastOffset(),
@@ -373,14 +349,13 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
                           ASTNodeAttr::Instruction);
     }
     return {};
-
-  case OpCode::Ref__eq:
+  */
   case OpCode::Array__len:
-  case OpCode::I31__new:
+  case OpCode::Any__convert_extern:
+  case OpCode::Extern__convert_any:
+  case OpCode::Ref__i31:
   case OpCode::I31__get_s:
   case OpCode::I31__get_u:
-  case OpCode::Extern__internalize:
-  case OpCode::Extern__externalize:
     return {};
 
   // Parametric Instructions.
@@ -389,12 +364,11 @@ Expect<void> Loader::loadInstruction(AST::Instruction &Instr) {
     return {};
   case OpCode::Select_t: {
     // Read the vector of value types.
-    uint32_t VecCnt;
-    if (auto Res = readU32(VecCnt); unlikely(!Res)) {
-      return Unexpect(Res);
-    }
-    if (VecCnt / 2 > FMgr.getRemainSize()) {
-      return logLoadError(ErrCode::Value::IntegerTooLong, FMgr.getLastOffset(),
+    uint32_t VecCnt = 0;
+    if (auto Res = loadVecCnt()) {
+      VecCnt = *Res;
+    } else {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
                           ASTNodeAttr::Instruction);
     }
     Instr.setValTypeListSize(VecCnt);

@@ -41,8 +41,11 @@ TEST(SerializeSectionTest, SerializeTypeSection) {
   WasmEdge::AST::FunctionType FT3(
       {}, std::vector<WasmEdge::ValType>{WasmEdge::TypeCode::V128});
   TypeSec.getContent().push_back(FT1);
+  TypeSec.getRecursiveSizes().push_back(1);
   TypeSec.getContent().push_back(FT2);
+  TypeSec.getRecursiveSizes().push_back(1);
   TypeSec.getContent().push_back(FT3);
+  TypeSec.getRecursiveSizes().push_back(1);
 
   std::vector<uint8_t> Output = *Ser.serializeSection(TypeSec);
   std::vector<uint8_t> Expected = {

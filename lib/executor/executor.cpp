@@ -85,8 +85,9 @@ Executor::invoke(const Runtime::Instance::FunctionInstance *FuncInst,
   const auto &FuncType = FuncInst->getFuncType();
   const auto &PTypes = FuncType.getParamTypes();
   const auto &RTypes = FuncType.getReturnTypes();
-  if (!matchTypes(*FuncInst->getModule(), ParamTypes, *FuncInst->getModule(),
-                  PTypes)) {
+  if (!AST::TypeMatcher::matchTypes(
+          FuncInst->getModule()->getTypeList(), ParamTypes,
+          FuncInst->getModule()->getTypeList(), PTypes)) {
     spdlog::error(ErrCode::Value::FuncSigMismatch);
     spdlog::error(ErrInfo::InfoMismatch(
         PTypes, RTypes, std::vector(ParamTypes.begin(), ParamTypes.end()),

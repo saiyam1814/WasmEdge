@@ -12,19 +12,6 @@
 namespace WasmEdge {
 namespace Loader {
 
-// Load content size. See "include/loader/loader.h".
-Expect<uint32_t> Loader::loadSectionSize(ASTNodeAttr Node) {
-  if (auto Res = FMgr.readU32()) {
-    if (unlikely(FMgr.getRemainSize() < (*Res))) {
-      return logLoadError(ErrCode::Value::LengthOutOfBounds,
-                          FMgr.getLastOffset(), Node);
-    }
-    return *Res;
-  } else {
-    return logLoadError(Res.error(), FMgr.getLastOffset(), Node);
-  }
-}
-
 // Load content of custom section. See "include/loader/loader.h".
 Expect<void> Loader::loadSection(AST::CustomSection &Sec) {
   return loadSectionContent(Sec, [this, &Sec]() -> Expect<void> {
@@ -56,23 +43,53 @@ Expect<void> Loader::loadSection(AST::CustomSection &Sec) {
 // Load vector of type section. See "include/loader/loader.h".
 Expect<void> Loader::loadSection(AST::TypeSection &Sec) {
   return loadSectionContent(Sec, [this, &Sec]() -> Expect<void> {
-    std::vector<std::vector<AST::DefinedType>> RecursiveTypeGroups;
-    auto Res = loadVec(RecursiveTypeGroups,
-                       [this](std::vector<AST::DefinedType> &Group) {
-                         return loadRecursiveTypeGroup(Group);
-    });
-    if (!Res) {
-      return Unexpect(Res);
+    // Read the recursive type vector size.
+    uint32_t VecCnt = 0;
+    if (auto Res = loadVecCnt()) {
+      VecCnt = *Res;
+    } else {
+      return logLoadError(Res.error(), FMgr.getLastOffset(),
+                          ASTNodeAttr::Sec_Type);
     }
-
-    auto &Types = Sec.getContent();
-    auto &GroupEndIdx = Sec.getGroupEndIdx();
-
-    for (auto &&Group : std::move(RecursiveTypeGroups)) {
-      for (auto &&Type : std::move(Group)) {
-        Types.push_back(Type);
+    // Read the recursive types.
+    Sec.getContent().clear();
+    Sec.getRecursiveSizes().clear();
+    Sec.getRecursiveSizes().reserve(VecCnt);
+    for (uint32_t I = 0; I < VecCnt; I++) {
+      auto StartOffset = FMgr.getOffset();
+      if (auto CodeByte = FMgr.readByte()) {
+        TypeCode Code = static_cast<TypeCode>(*CodeByte);
+        if (Code == TypeCode::Rec) {
+          // Case: 0x4E vec(subtype).
+          uint32_t VecCnt = 0;
+          if (auto Res = loadVecCnt()) {
+            VecCnt = *Res;
+          } else {
+            return logLoadError(Res.error(), FMgr.getLastOffset(),
+                                ASTNodeAttr::Sec_Type);
+          }
+          Sec.getRecursiveSizes().push_back(VecCnt);
+          for (uint32_t I = 0; I < VecCnt; ++I) {
+            Sec.getContent().emplace_back();
+            if (auto Res = loadType(Sec.getContent().back()); unlikely(!Res)) {
+              spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Sec_Type));
+              return Unexpect(Res);
+            }
+          }
+        } else {
+          // Case: subtype.
+          Sec.getRecursiveSizes().push_back(1);
+          FMgr.seek(StartOffset);
+          Sec.getContent().emplace_back();
+          if (auto Res = loadType(Sec.getContent().back()); unlikely(!Res)) {
+            spdlog::error(ErrInfo::InfoAST(ASTNodeAttr::Sec_Type));
+            return Unexpect(Res);
+          }
+        }
+      } else {
+        return logLoadError(CodeByte.error(), FMgr.getLastOffset(),
+                            ASTNodeAttr::Sec_Type);
       }
-      GroupEndIdx.push_back(Types.size());
     }
     return {};
   });

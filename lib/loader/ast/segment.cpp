@@ -232,15 +232,11 @@ Expect<void> Loader::loadSegment(AST::ElementSegment &ElemSeg) {
     [[fallthrough]];
   case 0x04: {
     uint32_t VecCnt = 0;
-    if (auto Res = FMgr.readU32(); unlikely(!Res)) {
+    if (auto Res = loadVecCnt()) {
+      VecCnt = *Res;
+    } else {
       return logLoadError(Res.error(), FMgr.getLastOffset(),
                           ASTNodeAttr::Seg_Element);
-    } else {
-      VecCnt = *Res;
-      if (VecCnt / 2 > FMgr.getRemainSize()) {
-        return logLoadError(ErrCode::Value::IntegerTooLong,
-                            FMgr.getLastOffset(), ASTNodeAttr::Seg_Element);
-      }
     }
     ElemSeg.getInitExprs().clear();
     ElemSeg.getInitExprs().reserve(VecCnt);
@@ -275,19 +271,14 @@ Expect<void> Loader::loadSegment(AST::CodeSegment &CodeSeg) {
 
   // Read the vector of local variable counts and types.
   uint32_t VecCnt = 0;
-  if (auto Res = FMgr.readU32()) {
+  if (auto Res = loadVecCnt()) {
     VecCnt = *Res;
-    if (VecCnt / 2 > FMgr.getRemainSize()) {
-      return logLoadError(ErrCode::Value::IntegerTooLong, FMgr.getLastOffset(),
-                          ASTNodeAttr::Seg_Code);
-    }
-
-    CodeSeg.getLocals().clear();
-    CodeSeg.getLocals().reserve(VecCnt);
   } else {
     return logLoadError(Res.error(), FMgr.getLastOffset(),
-                        ASTNodeAttr::Seg_Code);
+                        ASTNodeAttr::Seg_Element);
   }
+  CodeSeg.getLocals().clear();
+  CodeSeg.getLocals().reserve(VecCnt);
   uint32_t TotalLocalCnt = 0;
   for (uint32_t I = 0; I < VecCnt; ++I) {
     uint32_t LocalCnt = 0;
@@ -389,12 +380,8 @@ Expect<void> Loader::loadSegment(AST::DataSegment &DataSeg) {
   {
     // Read initialization data.
     uint32_t VecCnt = 0;
-    if (auto Res = FMgr.readU32()) {
+    if (auto Res = loadVecCnt()) {
       VecCnt = *Res;
-      if (VecCnt / 2 > FMgr.getRemainSize()) {
-        return logLoadError(ErrCode::Value::IntegerTooLong,
-                            FMgr.getLastOffset(), ASTNodeAttr::Seg_Data);
-      }
     } else {
       return logLoadError(Res.error(), FMgr.getLastOffset(),
                           ASTNodeAttr::Seg_Data);

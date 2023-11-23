@@ -88,8 +88,7 @@ Expect<void> Executor::trap(Runtime::StackManager &,
 Expect<void> Executor::call(Runtime::StackManager &StackMgr,
                             const uint32_t FuncIdx, const ValVariant *Args,
                             ValVariant *Rets) noexcept {
-  const auto *ModInst = StackMgr.getModule();
-  const auto *FuncInst = *ModInst->getFunc(FuncIdx);
+  const auto *FuncInst = getFuncInstByIdx(StackMgr, FuncIdx);
   const auto &FuncType = FuncInst->getFuncType();
   const uint32_t ParamsSize =
       static_cast<uint32_t>(FuncType.getParamTypes().size());
@@ -137,15 +136,17 @@ Expect<void *> Executor::tableGetFuncSymbol(Runtime::StackManager &StackMgr,
 
   const auto *ModInst = StackMgr.getModule();
   assuming(ModInst);
-  const auto TargetFuncType = ModInst->getFuncType(FuncTypeIdx);
-  assuming(TargetFuncType && *TargetFuncType);
+  const auto &TargetFuncType =
+      (*ModInst->getType(FuncTypeIdx))->getCompositeType().getFuncType();
   const auto *FuncInst = retrieveFuncRef(*Ref);
   assuming(FuncInst);
   const auto &FuncType = FuncInst->getFuncType();
-  if (!matchTypes(*ModInst, (*TargetFuncType)->getParamTypes(),
-                  *FuncInst->getModule(), FuncType.getParamTypes()) ||
-      !matchTypes(*ModInst, (*TargetFuncType)->getReturnTypes(),
-                  *FuncInst->getModule(), FuncType.getReturnTypes())) {
+  if (!AST::TypeMatcher::matchTypes(
+          ModInst->getTypeList(), TargetFuncType.getParamTypes(),
+          FuncInst->getModule()->getTypeList(), FuncType.getParamTypes()) ||
+      !AST::TypeMatcher::matchTypes(
+          ModInst->getTypeList(), TargetFuncType.getReturnTypes(),
+          FuncInst->getModule()->getTypeList(), FuncType.getReturnTypes())) {
     return Unexpect(ErrCode::Value::IndirectCallTypeMismatch);
   }
 
@@ -175,12 +176,17 @@ Executor::callIndirect(Runtime::StackManager &StackMgr, const uint32_t TableIdx,
 
   const auto *ModInst = StackMgr.getModule();
   assuming(ModInst);
-  const auto TargetFuncType = ModInst->getFuncType(FuncTypeIdx);
-  assuming(TargetFuncType && *TargetFuncType);
+  const auto &TargetFuncType =
+      (*ModInst->getType(FuncTypeIdx))->getCompositeType().getFuncType();
   const auto *FuncInst = retrieveFuncRef(*Ref);
   assuming(FuncInst);
   const auto &FuncType = FuncInst->getFuncType();
-  if (unlikely(**TargetFuncType != FuncType)) {
+  if (!AST::TypeMatcher::matchTypes(
+          ModInst->getTypeList(), TargetFuncType.getParamTypes(),
+          FuncInst->getModule()->getTypeList(), FuncType.getParamTypes()) ||
+      !AST::TypeMatcher::matchTypes(
+          ModInst->getTypeList(), TargetFuncType.getReturnTypes(),
+          FuncInst->getModule()->getTypeList(), FuncType.getReturnTypes())) {
     return Unexpect(ErrCode::Value::IndirectCallTypeMismatch);
   }
 
@@ -398,11 +404,9 @@ Expect<void> Executor::elemDrop(Runtime::StackManager &StackMgr,
 
 Expect<RefVariant> Executor::refFunc(Runtime::StackManager &StackMgr,
                                      const uint32_t FuncIdx) noexcept {
-  const auto *ModInst = StackMgr.getModule();
-  assuming(ModInst);
-  const auto FuncInst = ModInst->getFunc(FuncIdx);
-  assuming(FuncInst && *FuncInst);
-  return RefVariant(*FuncInst);
+  auto *FuncInst = getFuncInstByIdx(StackMgr, FuncIdx);
+  assuming(FuncInst);
+  return RefVariant(FuncInst);
 }
 
 Expect<uint32_t> Executor::memoryAtomicNotify(Runtime::StackManager &StackMgr,

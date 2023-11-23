@@ -30,8 +30,14 @@ namespace Instance {
 class TableInstance {
 public:
   TableInstance() = delete;
-  TableInstance(const AST::TableType &TType,
-                const RefVariant InitVal = RefVariant()) noexcept
+  TableInstance(const AST::TableType &TType) noexcept
+      : TabType(TType),
+        Refs(TType.getLimit().getMin(), RefVariant(TType.getRefType())),
+        InitValue(RefVariant(TType.getRefType())) {
+    // The reftype should a nullable reference because of no init ref.
+    assuming(TType.getRefType().isNullableRefType());
+  }
+  TableInstance(const AST::TableType &TType, const RefVariant &InitVal) noexcept
       : TabType(TType), Refs(TType.getLimit().getMin(), InitVal),
         InitValue(InitVal) {
     // If the reftype is not a nullable reference, the init ref is required.
@@ -61,7 +67,7 @@ public:
   }
 
   /// Grow table with initialization value.
-  bool growTable(uint32_t Count, RefVariant Val) noexcept {
+  bool growTable(uint32_t Count, const RefVariant &Val) noexcept {
     uint32_t MaxSizeCaped = std::numeric_limits<uint32_t>::max();
     uint32_t Min = TabType.getLimit().getMin();
     uint32_t Max = TabType.getLimit().getMax();
@@ -72,7 +78,8 @@ public:
       return false;
     }
     Refs.resize(Refs.size() + Count);
-    std::fill_n(Refs.end() - Count, Count, Val);
+    std::fill_n(Refs.end() - Count, Count,
+                RefVariant(TabType.getRefType(), Val));
     TabType.getLimit().setMin(Min + Count);
     return true;
   }
@@ -114,12 +121,15 @@ public:
     }
 
     // Copy the references.
-    std::copy_n(Slice.begin() + Start, Length, Refs.begin() + Offset);
+    std::transform(Slice.begin() + Start, Slice.begin() + Start + Length,
+                   Refs.begin() + Offset, [this](const RefVariant &Ref) {
+                     return RefVariant(TabType.getRefType(), Ref);
+                   });
     return {};
   }
 
   /// Fill the Refs[Offset : Offset + Length - 1] by Val.
-  Expect<void> fillRefs(const RefVariant Val, uint32_t Offset,
+  Expect<void> fillRefs(const RefVariant &Val, uint32_t Offset,
                         uint32_t Length) noexcept {
     // Check the accessing boundary.
     if (!checkAccessBound(Offset, Length)) {
@@ -129,7 +139,8 @@ public:
     }
 
     // Fill the references.
-    std::fill_n(Refs.begin() + Offset, Length, Val);
+    std::fill_n(Refs.begin() + Offset, Length,
+                RefVariant(TabType.getRefType(), Val));
     return {};
   }
 
@@ -144,13 +155,13 @@ public:
   }
 
   /// Set the elem address.
-  Expect<void> setRefAddr(uint32_t Idx, RefVariant Val) {
+  Expect<void> setRefAddr(uint32_t Idx, const RefVariant &Val) {
     if (Idx >= Refs.size()) {
       spdlog::error(ErrCode::Value::TableOutOfBounds);
       spdlog::error(ErrInfo::InfoBoundary(Idx, 1, getBoundIdx()));
       return Unexpect(ErrCode::Value::TableOutOfBounds);
     }
-    Refs[Idx] = Val;
+    Refs[Idx] = RefVariant(TabType.getRefType(), Val);
     return {};
   }
 

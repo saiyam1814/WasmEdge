@@ -5701,17 +5701,18 @@ void Compiler::compile(const AST::TypeSection &TypeSec) noexcept {
                                   {Context->ExecCtxPtrTy, Context->Int8PtrTy,
                                    Context->Int8PtrTy, Context->Int8PtrTy},
                                   false);
-  const auto &DefinedTypes = TypeSec.getContent();
-  const auto Size = DefinedTypes.size();
-  if (Size == 0) {
-    return;
-  }
-  Context->FunctionTypes.reserve(Size);
-  Context->FunctionWrappers.reserve(Size);
+  auto SubTypes = TypeSec.getContent();
+  Context->FunctionTypes.reserve(SubTypes.size());
+  Context->FunctionWrappers.reserve(SubTypes.size());
 
   // Iterate and compile types.
-  for (size_t I = 0; I < Size; ++I) {
-    const auto &FuncType = DefinedTypes[I].asFunctionType();
+  for (size_t I = 0; I < SubTypes.size(); ++I) {
+    const auto &CompType = SubTypes[I].getCompositeType();
+    if (!CompType.isFunc()) {
+      // TODO: GC - implement the other types
+      continue;
+    }
+    const auto &FuncType = CompType.getFuncType();
     const auto Name = fmt::format("t{}"sv, Context->FunctionTypes.size());
 
     // Check function type is unique

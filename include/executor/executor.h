@@ -21,6 +21,7 @@
 #include "common/errcode.h"
 #include "common/statistics.h"
 #include "runtime/callingframe.h"
+#include "runtime/heapmgr.h"
 #include "runtime/instance/module.h"
 #include "runtime/stackmgr.h"
 #include "runtime/storemgr.h"
@@ -271,21 +272,16 @@ private:
                              AST::InstrView::iterator &PC) noexcept;
   /// @}
 
-  /// \name Helper Functions for matching value types.
-  /// @{
-  bool matchType(const Runtime::Instance::ModuleInstance &ModExp,
-                 const ValType &Exp,
-                 const Runtime::Instance::ModuleInstance &ModGot,
-                 const ValType &Got) const noexcept;
-
-  bool matchTypes(const Runtime::Instance::ModuleInstance &ModExp,
-                  Span<const ValType> Exp,
-                  const Runtime::Instance::ModuleInstance &ModGot,
-                  Span<const ValType> Got) const noexcept;
-  /// @}
-
   /// \name Helper Functions for getting instances.
   /// @{
+  /// Helper function for get defined type by index.
+  const AST::SubType *getDefTypeByIdx(Runtime::StackManager &StackMgr,
+                                      const uint32_t Idx) const;
+
+  /// Helper function for get function instance by index.
+  Runtime::Instance::FunctionInstance *
+  getFuncInstByIdx(Runtime::StackManager &StackMgr, const uint32_t Idx) const;
+
   /// Helper function for get table instance by index.
   Runtime::Instance::TableInstance *
   getTabInstByIdx(Runtime::StackManager &StackMgr, const uint32_t Idx) const;
@@ -306,9 +302,6 @@ private:
   Runtime::Instance::DataInstance *
   getDataInstByIdx(Runtime::StackManager &StackMgr, const uint32_t Idx) const;
   /// @}
-
-  bool canCast(Runtime::StackManager &StackMgr, const HeapType &HType,
-               bool AllowNull) const;
 
   /// \name Run instructions functions
   /// @{
@@ -360,6 +353,41 @@ private:
                               uint32_t Idx) const noexcept;
   Expect<void> runGlobalSetOp(Runtime::StackManager &StackMgr,
                               uint32_t Idx) const noexcept;
+  /// ======= Reference instructions =======
+  Expect<void> runRefNullOp(Runtime::StackManager &StackMgr,
+                            const ValType &Type) const noexcept;
+  Expect<void> runRefIsNullOp(ValVariant &Val) const noexcept;
+  Expect<void> runRefFuncOp(Runtime::StackManager &StackMgr,
+                            uint32_t Idx) const noexcept;
+  Expect<void> runRefEqOp(ValVariant &Val1,
+                          const ValVariant &Val2) const noexcept;
+  Expect<void> runRefAsNonNullOp(RefVariant &Val,
+                                 const AST::Instruction &Instr) const noexcept;
+  Expect<void> runStructNewOp(Runtime::StackManager &StackMgr,
+                              const AST::CompositeType &CompType,
+                              bool IsDefault = false) const noexcept;
+  Expect<void> runArrayNewOp(Runtime::StackManager &StackMgr,
+                             const AST::CompositeType &CompType,
+                             uint32_t InitCnt, uint32_t ValCnt) const noexcept;
+  Expect<void>
+  runArrayNewDataOp(Runtime::StackManager &StackMgr,
+                    const AST::CompositeType &CompType,
+                    const Runtime::Instance::DataInstance &DataInst,
+                    const AST::Instruction &Instr) const noexcept;
+  Expect<void>
+  runArrayNewElemOp(Runtime::StackManager &StackMgr,
+                    const AST::CompositeType &CompType,
+                    const Runtime::Instance::ElementInstance &ElemInst,
+                    const AST::Instruction &Instr) const noexcept;
+  Expect<void> runArrayLen(ValVariant &Val,
+                           const AST::Instruction &Instr) const noexcept;
+  Expect<void> runRefTestOp(Runtime::StackManager &StackMgr, RefVariant &Val,
+                            const AST::Instruction &Instr,
+                            bool IsCast = false) const noexcept;
+  Expect<void> runRefExternConvToOp(RefVariant &Val,
+                                    TypeCode TCode) const noexcept;
+  Expect<void> runRefI31(ValVariant &Val) const noexcept;
+
   /// ======= Table instructions =======
   Expect<void> runTableGetOp(Runtime::StackManager &StackMgr,
                              Runtime::Instance::TableInstance &TabInst,

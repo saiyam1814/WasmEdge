@@ -123,13 +123,52 @@ Serializer::serializeLimit(const AST::Limit &Lim,
   return {};
 }
 
+// Serialize sub type. See "include/loader/serialize.h".
+Expect<void>
+Serializer::serializeType(const AST::SubType &SType,
+                          std::vector<uint8_t> &OutVec) const noexcept {
+  // TODO: GC - log proposal
+
+  // Sub type: vec(typeidx)
+  if (SType.getTypeIndices().size() > 0) {
+    if (SType.isFinal()) {
+      OutVec.push_back(static_cast<uint8_t>(TypeCode::SubFinal));
+    } else {
+      OutVec.push_back(static_cast<uint8_t>(TypeCode::Sub));
+    }
+    serializeU32(static_cast<uint32_t>(SType.getTypeIndices().size()), OutVec);
+    for (const auto &Idx : SType.getTypeIndices()) {
+      serializeU32(Idx, OutVec);
+    }
+  }
+  // Composite type: array | struct | func
+  TypeCode CTypeCode = SType.getCompositeType().getContentTypeCode();
+  OutVec.push_back(static_cast<uint8_t>(CTypeCode));
+  switch (CTypeCode) {
+  case TypeCode::Func:
+    if (auto Res =
+            serializeType(SType.getCompositeType().getFuncType(), OutVec);
+        unlikely(!Res)) {
+      return Unexpect(Res);
+    }
+    break;
+  case TypeCode::Array:
+    // TODO: GC - implement
+  case TypeCode::Struct:
+    // TODO: GC - implement
+    break;
+  default:
+    return logSerializeError(ErrCode::Value::MalformedValType,
+                             ASTNodeAttr::Type_Rec);
+  }
+  return {};
+}
+
 // Serialize function type. See "include/loader/serialize.h".
 Expect<void>
 Serializer::serializeType(const AST::FunctionType &Type,
                           std::vector<uint8_t> &OutVec) const noexcept {
-  // Function type: 0x60 + paramtypes:vec(valtype) + returntypes:vec(valtype).
-  // Prefix 0x60.
-  OutVec.push_back(0x60U);
+  // Function type: paramtypes:vec(valtype) + returntypes:vec(valtype).
   // Param types: vec(valtype).
   serializeU32(static_cast<uint32_t>(Type.getParamTypes().size()), OutVec);
   for (auto &VType : Type.getParamTypes()) {

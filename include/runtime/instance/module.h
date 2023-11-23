@@ -22,7 +22,6 @@
 #include "runtime/instance/global.h"
 #include "runtime/instance/memory.h"
 #include "runtime/instance/table.h"
-#include "runtime/instance/heap.h"
 
 #include <atomic>
 #include <functional>
@@ -184,10 +183,10 @@ protected:
   friend class Executor::Executor;
   friend class Runtime::CallingFrame;
 
-  /// Copy the function types in type section to this module instance.
-  void addType(const AST::DefinedType &Type) {
+  /// Copy the defined types in type section to this module instance.
+  void addDefinedType(const AST::SubType &SType) {
     std::unique_lock Lock(Mutex);
-    Types.emplace_back(Type);
+    Types.push_back(SType);
   }
 
   /// Create and add instances into this module instance.
@@ -254,24 +253,30 @@ protected:
     ExpGlobals.insert_or_assign(std::string(Name), GlobInsts[Idx]);
   }
 
-  /// Get defined type by index.
-  Expect<const AST::FunctionType *> getFuncType(uint32_t Idx) const noexcept {
+  /// Get defined type list.
+  Span<const AST::SubType> getTypeList() const noexcept { return Types; }
+
+  /// Get instance pointer by index.
+  Expect<const AST::SubType *> getType(uint32_t Idx) const noexcept {
     std::shared_lock Lock(Mutex);
     if (unlikely(Idx >= Types.size())) {
       // Error logging need to be handled in caller.
       return Unexpect(ErrCode::Value::WrongInstanceIndex);
     }
-    // TODO: may need to ensure that the type is of function type
-    return &Types[Idx].asFunctionType();
+    return unsafeGetType(Idx);
   }
-
-  /// Get instance pointer by index.
+  const AST::SubType *unsafeGetType(uint32_t Idx) const noexcept {
+    return &Types[Idx];
+  }
   Expect<FunctionInstance *> getFunc(uint32_t Idx) const noexcept {
     std::shared_lock Lock(Mutex);
     if (Idx >= FuncInsts.size()) {
       // Error logging need to be handled in caller.
       return Unexpect(ErrCode::Value::WrongInstanceIndex);
     }
+    return unsafeGetFunction(Idx);
+  }
+  FunctionInstance *unsafeGetFunction(uint32_t Idx) const noexcept {
     return FuncInsts[Idx];
   }
   Expect<TableInstance *> getTable(uint32_t Idx) const noexcept {
@@ -428,8 +433,8 @@ protected:
   /// Module name.
   const std::string ModName;
 
-  /// Function types.
-  std::vector<AST::DefinedType> Types;
+  /// Defined types.
+  std::vector<AST::SubType> Types;
 
   /// Owned instances in this module.
   std::vector<std::unique_ptr<Instance::FunctionInstance>> OwnedFuncInsts;

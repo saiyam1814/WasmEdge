@@ -79,10 +79,11 @@ public:
                        ValVariant *Rets);
 
   /// Constructors.
-  FunctionType() = default;
-  FunctionType(Span<const ValType> P, Span<const ValType> R)
+  FunctionType() noexcept = default;
+  FunctionType(Span<const ValType> P, Span<const ValType> R) noexcept
       : ParamTypes(P.begin(), P.end()), ReturnTypes(R.begin(), R.end()) {}
-  FunctionType(Span<const ValType> P, Span<const ValType> R, Symbol<Wrapper> S)
+  FunctionType(Span<const ValType> P, Span<const ValType> R,
+               Symbol<Wrapper> S) noexcept
       : ParamTypes(P.begin(), P.end()), ReturnTypes(R.begin(), R.end()),
         WrapSymbol(std::move(S)) {}
 
@@ -123,176 +124,286 @@ private:
   /// @}
 };
 
-class StorageType {
-public:
-  StorageType() noexcept = default;
-  StorageType(FullValType VType) noexcept : Type(VType) {
-    const auto GetSize = [](FullValType VType) {
-      switch (VType.getTypeCode()) {
-      case ValTypeCode::I32:
-        return sizeof(int32_t);
-      case ValTypeCode::I64:
-        return sizeof(int64_t);
-      case ValTypeCode::F32:
-        return sizeof(float);
-      case ValTypeCode::F64:
-        return sizeof(double);
-      case ValTypeCode::V128:
-        return sizeof(int128_t);
-      case ValTypeCode::Ref:
-        return sizeof(RefVariant);
-      case ValTypeCode::RefNull:
-        return sizeof(RefVariant);
-      }
-    };
-    Size = GetSize(VType);
-  }
-  StorageType(PackedType PType) noexcept : Type(PType) {
-    switch (asPackedType()) {
-    case PackedType::I16:
-      Size = sizeof(int16_t);
-      return;
-    case PackedType::I8:
-      Size = sizeof(int8_t);
-      return;
-    }
-  }
-
-  bool isPackedType() const { return std::holds_alternative<PackedType>(Type); }
-
-  bool isValType() const { return std::holds_alternative<FullValType>(Type); }
-
-  PackedType asPackedType() const { return std::get<PackedType>(Type); }
-
-  FullValType asValType() const { return std::get<FullValType>(Type); }
-
-  uint32_t size() const {
-    assuming(Size != 0);
-    return Size;
-  }
-
-  FullValType unpackedType() const {
-    if (isValType()) {
-      return asValType();
-    } else {
-      return ValType::I32;
-    }
-  }
-
-private:
-  std::variant<FullValType, PackedType> Type;
-  uint32_t Size;
-};
-
+/// AST FieldType node for GC proposal.
 class FieldType {
 public:
+  /// Constructors.
   FieldType() noexcept = default;
-  FieldType(ValMut Mutability, StorageType Type) noexcept
-      : Mutability(Mutability), Type(Type) {}
-  ValMut getMutability() const noexcept { return Mutability; }
+  FieldType(const ValType &Type, ValMut Mut) noexcept : Type(Type), Mut(Mut) {}
 
-  StorageType getStorageType() const noexcept { return Type; }
+  /// Getter and setter of storage type.
+  const ValType &getStorageType() const noexcept { return Type; }
+  void setStorageType(const ValType &VType) noexcept { Type = VType; }
+
+  /// Getter and setter of value mutation.
+  ValMut getValMut() const noexcept { return Mut; }
+  void setValMut(ValMut VMut) noexcept { Mut = VMut; }
 
 private:
-  ValMut Mutability;
-  StorageType Type;
+  ValType Type;
+  ValMut Mut;
 };
 
-class ArrayType {
+/// AST CompositeType node for GC proposal.
+class CompositeType {
 public:
-  ArrayType() noexcept = default;
-  ArrayType(FieldType Type) noexcept : Type(Type) {}
-  FieldType getFieldType() const noexcept { return Type; }
-  bool isDefaultable() const noexcept {
-    return Type.getStorageType().unpackedType().isDefaultable();
+  /// Constructors.
+  CompositeType() noexcept = default;
+  CompositeType(const FunctionType &FT) noexcept
+      : Type(TypeCode::Func), FType(FT) {}
+
+  /// Getter of content.
+  const FunctionType &getFuncType() const noexcept {
+    return *std::get_if<FunctionType>(&FType);
+  }
+  FunctionType &getFuncType() noexcept {
+    return *std::get_if<FunctionType>(&FType);
+  }
+  const std::vector<FieldType> &getFieldTypes() const noexcept {
+    return *std::get_if<std::vector<FieldType>>(&FType);
   }
 
-private:
-  FieldType Type;
-};
+  /// Setter of content.
+  void setArrayType(FieldType &&FT) noexcept {
+    Type = TypeCode::Array;
+    FType = std::vector<FieldType>{std::move(FT)};
+  }
+  void setStructType(std::vector<FieldType> &&VFT) noexcept {
+    Type = TypeCode::Struct;
+    FType = std::move(VFT);
+  }
+  void setFunctionType(FunctionType &&FT) noexcept {
+    Type = TypeCode::Func;
+    FType = std::move(FT);
+  }
 
-class StructType {
-public:
-  StructType(std::vector<FieldType> &&TypeList) noexcept : Content(TypeList) {
-    Size = 0;
-    for (auto Type : TypeList) {
-      Offset.push_back(Size);
-      Size += Type.getStorageType().size();
+  /// Getter of content type.
+  TypeCode getContentTypeCode() const noexcept { return Type; }
+
+  /// Checker if is a function type.
+  bool isFunc() const noexcept { return (Type == TypeCode::Func); }
+
+  /// Expand the composite type to its reference.
+  TypeCode expand() const noexcept {
+    switch (Type) {
+    case TypeCode::Func:
+      return TypeCode::FuncRef;
+    case TypeCode::Struct:
+      return TypeCode::StructRef;
+    case TypeCode::Array:
+      return TypeCode::ArrayRef;
+    default:
+      assumingUnreachable();
     }
   }
 
-  Span<const FieldType> getContent() const noexcept { return Content; }
-  std::vector<FieldType> &getContent() noexcept { return Content; }
-
-  Span<const uint32_t> getOffset() const noexcept { return Offset; }
-
-  uint32_t size() const { return Size; }
-
 private:
-  std::vector<FieldType> Content;
-  std::vector<uint32_t> Offset;
-  uint32_t Size;
+  TypeCode Type;
+  std::variant<std::vector<FieldType>, FunctionType> FType;
 };
 
-class StructureType {
+/// AST SubType node for GC proposal.
+class SubType {
 public:
-  StructureType() noexcept = default;
-  StructureType(FunctionType &&Type) : VariantType(Type) {}
-  StructureType(StructType &&Type) : VariantType(Type) {}
-  StructureType(ArrayType &&Type) : VariantType(Type) {}
-  template <typename T> const T &asType() const {
-    return std::get<T>(VariantType);
-  }
-  template <typename T> T &asType() { return std::get<T>(VariantType); }
+  /// Constructors.
+  SubType() noexcept = default;
+  SubType(const FunctionType &FT) noexcept : IsFinal(true), CompType(FT) {}
 
-  template <typename T> bool isType() const {
-    return std::holds_alternative<T>(VariantType);
-  }
+  /// Getter and setter of final flag.
+  bool isFinal() const noexcept { return IsFinal; }
+  void setFinal(bool F) noexcept { IsFinal = F; }
 
-private:
-  std::variant<FunctionType, StructType, ArrayType> VariantType;
-};
+  /// Getter of type index vector.
+  Span<const uint32_t> getTypeIndices() const noexcept { return TypeIndex; }
+  std::vector<uint32_t> &getTypeIndices() noexcept { return TypeIndex; }
 
-class DefinedType {
-public:
-  DefinedType() noexcept = default;
-  DefinedType(StructType &&Type) noexcept
-      : IsFinal(true), ParentTypeIdx(), Type(std::move(Type)) {}
-  DefinedType(ArrayType &&Type) noexcept
-      : IsFinal(true), ParentTypeIdx(), Type(std::move(Type)) {}
-  DefinedType(FunctionType &&Type) noexcept
-      : IsFinal(true), ParentTypeIdx(), Type(std::move(Type)) {}
-  //  template <typename T>
-  //  DefinedType(T &&Type) noexcept
-  //      : IsFinal(true), ParentTypeIdx(), Type(std::move<T>(Type)) {}
-  DefinedType(bool IsFinal, std::vector<uint32_t> &&ParentTypeIdx,
-              StructureType &&Type) noexcept
-      : IsFinal(IsFinal), ParentTypeIdx(ParentTypeIdx), Type(Type) {}
-
-  const FunctionType &asFunctionType() const {
-    // TODO: check all usage of `asFunctionType` that each should ensure that
-    return Type.asType<FunctionType>();
-  }
-
-  FunctionType &asFunctionType() { return Type.asType<FunctionType>(); }
-
-  bool isFinal() const { return IsFinal; }
-
-  template <typename T> bool isType() const {
-    return Type.template isType<T>();
-  }
-
-  Span<const uint32_t> getParentTypeIdx() const { return ParentTypeIdx; }
-
-  const ArrayType &asArrayType() const { return Type.asType<ArrayType>(); }
-  const StructType &asStructType() const { return Type.asType<StructType>(); }
-
-  const StructureType &getType() const { return Type; }
+  /// Getter of composite type.
+  const CompositeType &getCompositeType() const noexcept { return CompType; }
+  CompositeType &getCompositeType() noexcept { return CompType; }
 
 private:
   bool IsFinal;
-  std::vector<uint32_t> ParentTypeIdx;
-  StructureType Type;
+  std::vector<uint32_t> TypeIndex;
+  CompositeType CompType;
+};
+
+/// AST Type match helper class.
+class TypeMatcher {
+public:
+  static bool matchType(Span<const SubType> ExpTypeList, uint32_t ExpIdx,
+                        Span<const SubType> GotTypeList,
+                        uint32_t GotIdx) noexcept {
+    const auto &ExpType = ExpTypeList[ExpIdx];
+    const auto &GotType = GotTypeList[GotIdx];
+    if (ExpIdx == GotIdx) {
+      return true;
+    }
+    for (auto TIdx : GotType.getTypeIndices()) {
+      if (matchType(ExpTypeList, ExpIdx, GotTypeList, TIdx)) {
+        return true;
+      }
+    }
+    return matchType(ExpTypeList, ExpType.getCompositeType(), GotTypeList,
+                     GotType.getCompositeType());
+  }
+
+  static bool matchType(Span<const SubType> ExpTypeList,
+                        const AST::CompositeType &Exp,
+                        Span<const SubType> GotTypeList,
+                        const AST::CompositeType &Got) noexcept {
+    if (Exp.getContentTypeCode() != Got.getContentTypeCode()) {
+      return false;
+    }
+    switch (Exp.getContentTypeCode()) {
+    case TypeCode::Func: {
+      const auto &ExpFType = Exp.getFuncType();
+      const auto &GotFType = Got.getFuncType();
+      return matchTypes(ExpTypeList, ExpFType.getParamTypes(), GotTypeList,
+                        GotFType.getReturnTypes()) &&
+             matchTypes(ExpTypeList, ExpFType.getReturnTypes(), GotTypeList,
+                        GotFType.getReturnTypes());
+    }
+    case TypeCode::Struct: {
+      const auto &ExpFType = Exp.getFieldTypes();
+      const auto &GotFType = Got.getFieldTypes();
+      if (GotFType.size() < ExpFType.size()) {
+        return false;
+      }
+      for (uint32_t I = 0; I < ExpFType.size(); I++) {
+        if (!matchType(ExpTypeList, ExpFType[I], GotTypeList, GotFType[I])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case TypeCode::Array: {
+      const auto &ExpFType = Exp.getFieldTypes();
+      const auto &GotFType = Got.getFieldTypes();
+      return matchType(ExpTypeList, ExpFType[0], GotTypeList, GotFType[0]);
+    }
+    default:
+      return false;
+    }
+  }
+
+  static bool matchType(Span<const SubType> ExpTypeList,
+                        const AST::FieldType &Exp,
+                        Span<const SubType> GotTypeList,
+                        const AST::FieldType &Got) noexcept {
+    bool IsMatch = false;
+    if (Exp.getValMut() == Got.getValMut()) {
+      // For both const or both var: Got storage type should match the expected
+      // storage type.
+      IsMatch = matchType(ExpTypeList, Exp.getStorageType(), GotTypeList,
+                          Got.getStorageType());
+      if (Exp.getValMut() == ValMut::Var) {
+        // If both var: and vice versa.
+        IsMatch &= matchType(GotTypeList, Got.getStorageType(), ExpTypeList,
+                             Exp.getStorageType());
+      }
+    }
+    return IsMatch;
+  }
+
+  static bool matchType(Span<const SubType> ExpTypeList, const ValType &Exp,
+                        Span<const SubType> GotTypeList,
+                        const ValType &Got) noexcept {
+    if (!Exp.isRefType() && !Got.isRefType() &&
+        Exp.getCode() == Got.getCode()) {
+      // Match for the non-reference type case.
+      return true;
+    }
+    if (Exp.isRefType() && Got.isRefType()) {
+      // Nullable matching.
+      if (!(Exp.isNullableRefType() || !Got.isNullableRefType())) {
+        return false;
+      }
+
+      // Match heap type.
+      if (Exp.isAbsHeapType() && Got.isAbsHeapType()) {
+        // Case 1: Both abstract heap type.
+        return matchType(Exp.getHeapTypeCode(), Got.getHeapTypeCode());
+      } else if (Exp.isAbsHeapType()) {
+        // Case 2: Match a type index to abstract heap type.
+        return matchType(
+            Exp.getHeapTypeCode(),
+            GotTypeList[Got.getTypeIndex()].getCompositeType().expand());
+      } else if (Got.isAbsHeapType()) {
+        // Case 3: Match abstract heap type to a type index.
+        TypeCode ExpandGotType =
+            ExpTypeList[Exp.getTypeIndex()].getCompositeType().expand();
+        switch (Got.getHeapTypeCode()) {
+        case TypeCode::NullRef:
+          return matchType(TypeCode::AnyRef, ExpandGotType);
+        case TypeCode::NullFunc:
+          return matchType(TypeCode::FuncRef, ExpandGotType);
+        case TypeCode::NullExtern:
+          return matchType(TypeCode::ExternRef, ExpandGotType);
+        default:
+          return false;
+        }
+      } else {
+        // Case 4: Match defined types.
+        return matchType(ExpTypeList, Exp.getTypeIndex(), GotTypeList,
+                         Got.getTypeIndex());
+      }
+    }
+    return false;
+  }
+
+  static bool matchType(TypeCode Exp, TypeCode Got) noexcept {
+    // Handle the equal cases first.
+    if (Exp == Got) {
+      return true;
+    }
+
+    // Match the func types: nofunc <= func
+    if (Exp == TypeCode::FuncRef || Exp == TypeCode::NullFunc) {
+      return Got == TypeCode::NullFunc;
+    }
+    if (Got == TypeCode::FuncRef || Got == TypeCode::NullFunc) {
+      return false;
+    }
+
+    // Match the extern types: noextern <= extern
+    if (Exp == TypeCode::ExternRef || Exp == TypeCode::NullExtern) {
+      return Got == TypeCode::NullExtern;
+    }
+    if (Got == TypeCode::ExternRef || Got == TypeCode::NullExtern) {
+      return false;
+    }
+
+    // Match the other types: none <= i31 | struct | array <= eq <= any
+    switch (Exp) {
+    case TypeCode::I31Ref:
+    case TypeCode::StructRef:
+    case TypeCode::ArrayRef:
+      // This will filter out the i31/struct/array unmatch cases.
+      return Got == TypeCode::NullRef;
+    case TypeCode::EqRef:
+      return Got != TypeCode::AnyRef;
+    case TypeCode::AnyRef:
+      return true;
+    default:
+      break;
+    }
+    return false;
+  }
+
+  static bool matchTypes(Span<const SubType> ExpTypeList,
+                         Span<const ValType> Exp,
+                         Span<const SubType> GotTypeList,
+                         Span<const ValType> Got) noexcept {
+    if (Exp.size() != Got.size()) {
+      return false;
+    }
+    for (uint32_t I = 0; I < Exp.size(); I++) {
+      if (!matchType(ExpTypeList, Exp[I], GotTypeList, Got[I])) {
+        return false;
+      }
+    }
+    return true;
+  }
 };
 
 /// AST MemoryType node.

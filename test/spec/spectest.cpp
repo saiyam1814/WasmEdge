@@ -159,7 +159,7 @@ parseValueList(const simdjson::dom::array &Args) {
       std::string_view ValueStr = Value;
       if (Type == "externref"sv) {
         if (Value == "null"sv) {
-          Result.emplace_back(WasmEdge::RefVariant());
+          Result.emplace_back(WasmEdge::RefVariant(TypeCode::ExternRef));
         } else {
           // Add 0x1 uint32_t prefix in this externref index case.
           Result.emplace_back(WasmEdge::RefVariant(reinterpret_cast<void *>(
@@ -168,7 +168,7 @@ parseValueList(const simdjson::dom::array &Args) {
         ResultTypes.emplace_back(WasmEdge::TypeCode::ExternRef);
       } else if (Type == "funcref"sv) {
         if (Value == "null"sv) {
-          Result.emplace_back(WasmEdge::RefVariant());
+          Result.emplace_back(WasmEdge::RefVariant(TypeCode::FuncRef));
         } else {
           // Add 0x1 uint32_t prefix in this funcref index case.
           Result.emplace_back(WasmEdge::RefVariant(

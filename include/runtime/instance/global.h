@@ -36,8 +36,17 @@ public:
   /// Getter of value.
   const ValVariant &getValue() const noexcept { return Value; }
 
-  /// Getter of value.
-  ValVariant &getValue() noexcept { return Value; }
+  /// Getter of value pointer.
+  ValVariant *getValuePtr() noexcept { return &Value; }
+
+  /// Setter of value.
+  void setValue(const ValVariant &Val) noexcept {
+    if (GlobType.getValType().isRefType()) {
+      Value = RefVariant(GlobType.getValType(), Val.get<RefVariant>());
+    } else {
+      Value = Val;
+    }
+  }
 
 private:
   /// \name Data of global instance.

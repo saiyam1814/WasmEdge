@@ -146,13 +146,16 @@ Expect<void> Executor::instantiate(Runtime::StoreManager &StoreMgr,
       // Import matching.
       auto *TargetInst = TargetModInst->findFuncExports(ExtName);
       const auto &TargetType = TargetInst->getFuncType();
-      const auto *FuncType = *ModInst.getFuncType(TypeIdx);
+      const auto &FuncType =
+          (*ModInst.getType(TypeIdx))->getCompositeType().getFuncType();
       // External function type should match the import function type in
       // description.
-      if (!matchTypes(ModInst, FuncType->getParamTypes(), *TargetModInst,
-                      TargetType.getParamTypes()) ||
-          !matchTypes(ModInst, FuncType->getReturnTypes(), *TargetModInst,
-                      TargetType.getReturnTypes())) {
+      if (!AST::TypeMatcher::matchTypes(
+              ModInst.getTypeList(), FuncType.getParamTypes(),
+              TargetModInst->getTypeList(), TargetType.getParamTypes()) ||
+          !AST::TypeMatcher::matchTypes(
+              ModInst.getTypeList(), FuncType.getReturnTypes(),
+              TargetModInst->getTypeList(), TargetType.getReturnTypes())) {
         if (ModName == "wasi_snapshot_preview1") {
           /*
            * The following functions should provide V1 and V2.
@@ -178,7 +181,7 @@ Expect<void> Executor::instantiate(Runtime::StoreManager &StoreMgr,
             if (ExtName == *Iter) {
               auto *TargetInstV2 =
                   TargetModInst->findFuncExports(*Iter + "_v2");
-              if (TargetInstV2->getFuncType() == *FuncType) {
+              if (TargetInstV2->getFuncType() == FuncType) {
                 // Try to match the new version
                 TargetInst = TargetInstV2;
                 break;
@@ -187,8 +190,8 @@ Expect<void> Executor::instantiate(Runtime::StoreManager &StoreMgr,
           }
         } else {
           return logMatchError(
-              ModName, ExtName, ExtType, FuncType->getParamTypes(),
-              FuncType->getReturnTypes(), TargetType.getParamTypes(),
+              ModName, ExtName, ExtType, FuncType.getParamTypes(),
+              FuncType.getReturnTypes(), TargetType.getParamTypes(),
               TargetType.getReturnTypes());
         }
       }
@@ -207,10 +210,12 @@ Expect<void> Executor::instantiate(Runtime::StoreManager &StoreMgr,
       const auto &TargetLim = TargetType.getLimit();
       // External table reference type should match the import table reference
       // type in description, and vice versa.
-      if (!matchType(ModInst, TabType.getRefType(), *TargetModInst,
-                     TargetType.getRefType()) ||
-          !matchType(*TargetModInst, TargetType.getRefType(), ModInst,
-                     TabType.getRefType()) ||
+      if (!AST::TypeMatcher::matchType(
+              ModInst.getTypeList(), TabType.getRefType(),
+              TargetModInst->getTypeList(), TargetType.getRefType()) ||
+          !AST::TypeMatcher::matchType(
+              TargetModInst->getTypeList(), TargetType.getRefType(),
+              ModInst.getTypeList(), TabType.getRefType()) ||
           !matchLimit(TabLim, TargetLim)) {
         return logMatchError(ModName, ExtName, ExtType, TabType.getRefType(),
                              TabLim.hasMax(), TabLim.getMin(), TabLim.getMax(),
@@ -250,13 +255,15 @@ Expect<void> Executor::instantiate(Runtime::StoreManager &StoreMgr,
       if (TargetType.getValMut() == GlobType.getValMut()) {
         // For both const or both var: external global value type should match
         // the import global value type in description.
-        IsMatch = matchType(ModInst, GlobType.getValType(), *TargetModInst,
-                            TargetType.getValType());
+        IsMatch = AST::TypeMatcher::matchType(
+            ModInst.getTypeList(), GlobType.getValType(),
+            TargetModInst->getTypeList(), TargetType.getValType());
         if (TargetType.getValMut() == ValMut::Var) {
           // If both var: import global value type in description should also
           // match the external global value type.
-          IsMatch &= matchType(*TargetModInst, TargetType.getValType(), ModInst,
-                               GlobType.getValType());
+          IsMatch &= AST::TypeMatcher::matchType(
+              TargetModInst->getTypeList(), TargetType.getValType(),
+              ModInst.getTypeList(), GlobType.getValType());
         }
       }
       if (!IsMatch) {

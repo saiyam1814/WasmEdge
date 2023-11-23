@@ -236,7 +236,36 @@ public:
     }
   }
 
-protected:
+  uint32_t getBitWidth() const noexcept {
+    switch (Inner.Data.Code) {
+    case TypeCode::I8:
+      return 8U;
+    case TypeCode::I16:
+      return 16U;
+    case TypeCode::I32:
+    case TypeCode::F32:
+      return 32U;
+    case TypeCode::I64:
+    case TypeCode::F64:
+      return 64U;
+    case TypeCode::V128:
+      return 128U;
+    default:
+      // Bit width not available for reftypes.
+      assumingUnreachable();
+    }
+  }
+
+  ValType toNullableRef() const noexcept {
+    assuming(isRefType());
+    return ValType(TypeCode::RefNull, Inner.Data.HTCode, Inner.Data.Idx);
+  }
+  ValType toNonNullableRef() const noexcept {
+    assuming(isRefType());
+    return ValType(TypeCode::Ref, Inner.Data.HTCode, Inner.Data.Idx);
+  }
+
+private:
   union {
     uint8_t Raw[8];
     struct {
@@ -303,21 +332,68 @@ private:
 /// FuncRef definition.
 namespace Runtime::Instance {
 class FunctionInstance;
-}
+class StructInstance;
+class ArrayInstance;
+} // namespace Runtime::Instance
 
 /// NumType and RefType variant definitions.
 struct RefVariant {
+  // Constructors.
+  RefVariant() noexcept : Type(TypeCode::ExternRef), Ptr(nullptr) {}
+  RefVariant(const ValType &VT) noexcept : Type(VT), Ptr(nullptr) {}
+  RefVariant(const ValType &VT, const RefVariant &Val) noexcept
+      : Type(VT), Ptr(Val.Ptr) {}
+
+  template <typename T>
+  RefVariant(const T *P) noexcept
+      : Type(TypeCode::ExternRef),
+        Ptr(reinterpret_cast<void *>(const_cast<T *>(P))) {}
+  template <>
+  RefVariant(const Runtime::Instance::FunctionInstance *P) noexcept
+      : Type(TypeCode::FuncRef),
+        Ptr(reinterpret_cast<void *>(
+            const_cast<Runtime::Instance::FunctionInstance *>(P))) {}
+  template <>
+  RefVariant(const Runtime::Instance::StructInstance *P) noexcept
+      : Type(TypeCode::StructRef),
+        Ptr(reinterpret_cast<void *>(
+            const_cast<Runtime::Instance::StructInstance *>(P))) {}
+  template <>
+  RefVariant(const Runtime::Instance::ArrayInstance *P) noexcept
+      : Type(TypeCode::ArrayRef),
+        Ptr(reinterpret_cast<void *>(
+            const_cast<Runtime::Instance::ArrayInstance *>(P))) {}
+
+  template <typename T>
+  RefVariant(T *P) noexcept
+      : Type(TypeCode::ExternRef), Ptr(reinterpret_cast<void *>(P)) {}
+  template <>
+  RefVariant(Runtime::Instance::FunctionInstance *P) noexcept
+      : Type(TypeCode::FuncRef), Ptr(reinterpret_cast<void *>(P)) {}
+  template <>
+  RefVariant(Runtime::Instance::StructInstance *P) noexcept
+      : Type(TypeCode::StructRef), Ptr(reinterpret_cast<void *>(P)) {}
+  template <>
+  RefVariant(Runtime::Instance::ArrayInstance *P) noexcept
+      : Type(TypeCode::ArrayRef), Ptr(reinterpret_cast<void *>(P)) {}
+
+  // Check is null.
+  bool isNull() const { return Ptr == nullptr; }
+
+  // Getter of type.
+  const ValType &getType() const noexcept { return Type; }
+
+  // Getter of pointer.
+  template <typename T> T *asPtr() const noexcept {
+    return reinterpret_cast<T *>(Ptr);
+  }
+
+  // Member data.
+  ValType Type;
 #if __INTPTR_WIDTH__ == 32
   uint32_t Padding = -1;
 #endif
-  void *Ptr = nullptr;
-  RefVariant() = default;
-  template <typename T>
-  RefVariant(const T *P) : Ptr(reinterpret_cast<void *>(const_cast<T *>(P))) {}
-  template <typename T> RefVariant(T *P) : Ptr(reinterpret_cast<void *>(P)) {}
-  bool isNull() const { return Ptr == nullptr; }
-
-  template <typename T> T *asPtr() const { return reinterpret_cast<T *>(Ptr); }
+  void *Ptr;
 };
 
 using ValVariant =
@@ -470,11 +546,9 @@ inline ValVariant ValueFromType(ValType Type) noexcept {
     return double(0.0);
   case TypeCode::V128:
     return uint128_t(0U);
-  case TypeCode::FuncRef:
-  case TypeCode::ExternRef:
   case TypeCode::Ref:
   case TypeCode::RefNull:
-    return RefVariant();
+    return RefVariant(Type);
   default:
     assumingUnreachable();
   }
