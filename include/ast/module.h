@@ -166,6 +166,7 @@ public:
     return CustomSecs;
   }
   CoreModuleSection &getCoreModuleSection() noexcept { return CoreModSec; }
+  CoreInstanceSection &getCoreInstanceSection() noexcept { return CoreInstSec; }
   TypeSection &getCoreTypeSection() noexcept { return CoreTypeSec; }
   ComponentSection &getComponentSection() noexcept { return CompSec; }
   AliasSection &getAliasSection() noexcept { return AliasSec; }
@@ -178,6 +179,7 @@ private:
   std::vector<Byte> Layer;
   std::vector<CustomSection> CustomSecs;
   CoreModuleSection CoreModSec;
+  CoreInstanceSection CoreInstSec;
   TypeSection CoreTypeSec;
   ComponentSection CompSec;
   AliasSection AliasSec;
