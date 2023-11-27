@@ -173,7 +173,7 @@ Serializer::serializeSegment(const AST::DataSegment &Seg,
     break;
 
   default:
-    break;
+    assumingUnreachable();
   }
 
   serializeU32(static_cast<uint32_t>(Seg.getData().size()), OutVec);
